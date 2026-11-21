@@ -1,12 +1,21 @@
 import { create } from 'zustand';
 
 export type ToastTone = 'info' | 'success' | 'warning' | 'error';
+export type ToastPosition = 'bottom-right' | 'top-right';
+
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 
 export interface ToastItem {
   id: string;
   title: string;
   description?: string;
   tone: ToastTone;
+  position?: ToastPosition;
+  action?: ToastAction;
+  durationMs?: number;
 }
 
 interface ToastStoreState {
@@ -24,15 +33,16 @@ export const useToastStore = create<ToastStoreState>((set) => ({
         : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     set((state) => ({
-      toasts: [...state.toasts.slice(-3), { ...toast, id }],
+      toasts: [...state.toasts.slice(-4), { ...toast, id }],
     }));
 
-    if (typeof window !== 'undefined') {
+    const duration = toast.durationMs ?? 4500;
+    if (typeof window !== 'undefined' && duration > 0) {
       window.setTimeout(() => {
         set((state) => ({
           toasts: state.toasts.filter((item) => item.id !== id),
         }));
-      }, 4500);
+      }, duration);
     }
 
     return id;

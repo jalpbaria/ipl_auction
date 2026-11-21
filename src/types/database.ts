@@ -12,6 +12,8 @@ export interface DbRoom {
   created_at: string;
 }
 
+export type TeamStatus = 'open' | 'active' | 'removed';
+
 export interface DbTeam {
   id: string;
   room_id: string;
@@ -19,7 +21,7 @@ export interface DbTeam {
   name: string;
   leader_id: string | null;
   leader_name: string | null;
-  status: string;
+  status: TeamStatus;
   joined_at: string | null;
 }
 
@@ -30,6 +32,108 @@ export interface DbTeamFinance {
   spent_lakhs: number;
 }
 
+export interface DbTeamCode {
+  id: string;
+  room_id: string;
+  team_id: string;
+  code: string;
+  used: boolean;
+  used_by: string | null;
+  used_at: string | null;
+  created_at: string;
+}
+
+export interface DbTeamMember {
+  id: string;
+  team_id: string;
+  name: string;
+  email: string;
+  is_leader: boolean;
+  created_at: string;
+}
+
+export type PlayerCategory =
+  | 'Legends'
+  | 'Marquee'
+  | 'Batsman'
+  | 'Bowler'
+  | 'Wicketkeeper'
+  | 'Allrounder';
+
+export interface DbPlayer {
+  id: string;
+  serial: number;
+  first_name: string;
+  last_name: string;
+  category: PlayerCategory;
+  skill: string;
+  nationality: string;
+  is_overseas: boolean;
+  ipl_season: string | null;
+  ipl_team: string | null;
+  matches: number;
+  runs: number;
+  strike_rate: number;
+  economy: number;
+  wickets: number;
+  base_price_lakhs: number;
+  card_image_url: string | null;
+}
+
+export type RoomPlayerStatus = 'pending' | 'live' | 'sold' | 'unsold';
+
+export interface DbRoomPlayer {
+  id: string;
+  room_id: string;
+  player_id: string;
+  base_price_lakhs: number;
+  set_no: number;
+  sort_order: number;
+  status: RoomPlayerStatus;
+  sold_to_team_id: string | null;
+  sold_price_lakhs: number | null;
+  sold_at: string | null;
+}
+
+export interface RoomPlayerWithPlayer {
+  id: string;
+  base_price_lakhs: number;
+  set_no: number;
+  status: RoomPlayerStatus;
+  sold_to_team_id: string | null;
+  sold_price_lakhs: number | null;
+  players: DbPlayer | null;
+}
+
+export interface DbViolation {
+  id: string;
+  room_id: string;
+  team_id: string;
+  type: string;
+  details: string | null;
+  created_at: string;
+}
+
+export type RejoinRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface DbRejoinRequest {
+  id: string;
+  room_id: string;
+  team_id: string;
+  requested_by: string;
+  status: RejoinRequestStatus;
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface DbNotice {
+  id: string;
+  room_id: string;
+  message: string;
+  opens_at: string | null;
+  created_at: string;
+}
+
 export interface DbProfile {
   id: string;
   full_name: string;
@@ -37,14 +141,4 @@ export interface DbProfile {
   avatar_url: string | null;
   rules_accepted_at: string | null;
   created_at: string;
-}
-
-export interface DbRejoinRequest {
-  id: string;
-  room_id: string;
-  team_id: string;
-  requested_by: string;
-  status: string;
-  created_at: string;
-  resolved_at: string | null;
 }

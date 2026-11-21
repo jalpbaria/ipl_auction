@@ -10,11 +10,18 @@ import {
 } from 'react-router-dom';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { ToastViewport } from './components/ui/ToastViewport';
-import HostRoom from './pages/HostRoom';
+import HostLayout from './layouts/HostLayout';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import PlayRoom from './pages/PlayRoom';
 import Rooms from './pages/Rooms';
+import HostNotices from './pages/host/HostNotices';
+import HostOverview from './pages/host/HostOverview';
+import HostPlayers from './pages/host/HostPlayers';
+import HostPurseControl from './pages/host/HostPurseControl';
+import HostRejoinRequests from './pages/host/HostRejoinRequests';
+import HostSettings from './pages/host/HostSettings';
+import HostTeamCodes from './pages/host/HostTeamCodes';
 import { useAuthStore } from './store/auth';
 
 const TOUCH_SESSION_INTERVAL_MS = 45_000;
@@ -79,10 +86,19 @@ export default function App() {
             path="/host/:roomId"
             element={
               <ProtectedRoute>
-                <HostRoom />
+                <HostLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<Navigate to="overview" replace />} />
+            <Route path="overview" element={<HostOverview />} />
+            <Route path="codes" element={<HostTeamCodes />} />
+            <Route path="rejoin" element={<HostRejoinRequests />} />
+            <Route path="players" element={<HostPlayers />} />
+            <Route path="notices" element={<HostNotices />} />
+            <Route path="purse" element={<HostPurseControl />} />
+            <Route path="settings" element={<HostSettings />} />
+          </Route>
           <Route
             path="/play/:roomId"
             element={

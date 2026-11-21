@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
-import { type ToastTone, useToastStore } from '../../store/toast';
+import { type ToastItem, type ToastTone, useToastStore } from '../../store/toast';
 
 const TONE_STYLES: Record<
   ToastTone,
@@ -27,19 +27,24 @@ const TONE_STYLES: Record<
   },
 };
 
-export function ToastViewport() {
-  const toasts = useToastStore((s) => s.toasts);
-  const dismissToast = useToastStore((s) => s.dismissToast);
-
-  if (toasts.length === 0) return null;
+function ToastStack({
+  items,
+  positionClass,
+  dismissToast,
+}: {
+  items: ToastItem[];
+  positionClass: string;
+  dismissToast: (id: string) => void;
+}) {
+  if (items.length === 0) return null;
 
   return (
     <div
       aria-live="polite"
       aria-label="Notifications"
-      className="pointer-events-none fixed bottom-5 right-5 z-50 flex w-full max-w-sm flex-col gap-2.5 px-4 sm:px-0"
+      className={`pointer-events-none fixed z-50 flex w-full max-w-sm flex-col gap-2.5 px-4 sm:px-0 ${positionClass}`}
     >
-      {toasts.map((toast) => {
+      {items.map((toast) => {
         const style = TONE_STYLES[toast.tone];
         const Icon = style.Icon;
 
@@ -59,6 +64,18 @@ export function ToastViewport() {
                   {toast.description}
                 </p>
               )}
+              {toast.action && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    toast.action?.onClick();
+                    dismissToast(toast.id);
+                  }}
+                  className="mt-2 inline-flex items-center rounded-[2px] border border-[#F5B921]/50 bg-[#F5B921]/10 px-2.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[#F5B921] transition-colors hover:bg-[#F5B921] hover:text-[#070B14] focus-visible:outline-2 focus-visible:outline-[#22D3EE]"
+                >
+                  {toast.action.label}
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -72,5 +89,30 @@ export function ToastViewport() {
         );
       })}
     </div>
+  );
+}
+
+export function ToastViewport() {
+  const toasts = useToastStore((s) => s.toasts);
+  const dismissToast = useToastStore((s) => s.dismissToast);
+
+  if (toasts.length === 0) return null;
+
+  const topRight = toasts.filter((t) => t.position === 'top-right');
+  const bottomRight = toasts.filter((t) => t.position !== 'top-right');
+
+  return (
+    <>
+      <ToastStack
+        items={topRight}
+        positionClass="top-20 right-5"
+        dismissToast={dismissToast}
+      />
+      <ToastStack
+        items={bottomRight}
+        positionClass="bottom-5 right-5"
+        dismissToast={dismissToast}
+      />
+    </>
   );
 }

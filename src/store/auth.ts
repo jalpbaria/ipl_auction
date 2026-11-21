@@ -104,6 +104,7 @@ interface AuthStoreState {
   completeAuthSession: (session: Session) => Promise<void>;
   touchCurrentSession: () => Promise<boolean>;
   syncRulesAcceptedAt: () => Promise<void>;
+  updateProfileName: (fullName: string) => Promise<void>;
   logout: () => Promise<void>;
   clearKickedMessage: () => void;
 }
@@ -290,6 +291,32 @@ export const useAuthStore = create<AuthStoreState>((set, get) => ({
         profile: {
           ...profile,
           rules_accepted_at: acceptedAt,
+        },
+      });
+    }
+  },
+
+  updateProfileName: async (fullName: string) => {
+    const { session, profile } = get();
+    if (!supabase || !session) {
+      throw new Error('You must be signed in to update your profile.');
+    }
+
+    const trimmed = fullName.trim();
+    const { error } = await supabase
+      .from('profiles')
+      .update({ full_name: trimmed })
+      .eq('id', session.user.id);
+
+    if (error) {
+      throw new Error(error.message || 'Could not update profile name.');
+    }
+
+    if (profile) {
+      set({
+        profile: {
+          ...profile,
+          full_name: trimmed,
         },
       });
     }
