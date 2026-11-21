@@ -1,5 +1,6 @@
 import { AlertTriangle, KeyRound, Loader2, Save, User } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { FullResetModal } from '../../components/host/FullResetModal';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { FormField, INPUT_BASE_CLASS } from '../../components/ui/FormField';
@@ -13,6 +14,7 @@ export default function HostSettings() {
   const room = useHostRoom((s) => s.room);
   const refreshRoom = useHostRoom((s) => s.refreshRoom);
   const refreshTeamsAndFinances = useHostRoom((s) => s.refreshTeamsAndFinances);
+  const refreshRoomPlayers = useHostRoom((s) => s.refreshRoomPlayers);
 
   const profile = useAuthStore((s) => s.profile);
   const updateProfileName = useAuthStore((s) => s.updateProfileName);
@@ -38,6 +40,9 @@ export default function HostSettings() {
   const [fullName, setFullName] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
+
+  // Full auction reset modal
+  const [fullResetOpen, setFullResetOpen] = useState(false);
 
   useEffect(() => {
     if (!room) return;
@@ -471,7 +476,7 @@ export default function HostSettings() {
                 DANGER ZONE
               </h2>
               <p className="mt-1 text-xs text-[#8B95AA]">
-                Available in the auction phase
+                Wipe all sales, bids, and restore purses back to Set 1 standby. Teams and members remain intact.
               </p>
             </div>
           </div>
@@ -479,14 +484,26 @@ export default function HostSettings() {
           <Button
             variant="outline"
             size="md"
-            disabled
-            title="Available in the auction phase"
-            className="border-red-500/40 text-red-300"
+            onClick={() => setFullResetOpen(true)}
+            className="border-red-500/50 text-red-300 hover:border-red-400 hover:bg-red-500/15 hover:text-red-200"
           >
             Full auction reset
           </Button>
         </div>
       </Card>
+
+      <FullResetModal
+        open={fullResetOpen}
+        onClose={() => setFullResetOpen(false)}
+        roomId={room.id}
+        onSuccess={async () => {
+          await Promise.all([
+            refreshRoom(),
+            refreshTeamsAndFinances(),
+            refreshRoomPlayers(),
+          ]);
+        }}
+      />
     </div>
   );
 }

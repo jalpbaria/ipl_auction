@@ -15,6 +15,8 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import PlayRoom from './pages/PlayRoom';
 import Rooms from './pages/Rooms';
+import TeamAuction from './pages/TeamAuction';
+import HostAuction from './pages/host/HostAuction';
 import HostNotices from './pages/host/HostNotices';
 import HostOverview from './pages/host/HostOverview';
 import HostPlayers from './pages/host/HostPlayers';
@@ -92,6 +94,7 @@ export default function App() {
           >
             <Route index element={<Navigate to="overview" replace />} />
             <Route path="overview" element={<HostOverview />} />
+            <Route path="auction" element={<HostAuction />} />
             <Route path="codes" element={<HostTeamCodes />} />
             <Route path="rejoin" element={<HostRejoinRequests />} />
             <Route path="players" element={<HostPlayers />} />
@@ -104,6 +107,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <PlayRoom />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/play/:roomId/auction"
+            element={
+              <ProtectedRoute>
+                <TeamAuction />
               </ProtectedRoute>
             }
           />

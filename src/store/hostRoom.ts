@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type {
+  AuctionPhase,
   DbNotice,
   DbPlayer,
   DbRejoinRequest,
@@ -17,9 +18,11 @@ interface RawRoomPlayerRow {
   id: string;
   base_price_lakhs: number;
   set_no: number;
+  sort_order: number;
   status: RoomPlayerStatus;
   sold_to_team_id: string | null;
   sold_price_lakhs: number | null;
+  sold_at: string | null;
   players: DbPlayer | DbPlayer[] | null;
 }
 
@@ -29,9 +32,11 @@ function normalizeRoomPlayer(row: RawRoomPlayerRow): RoomPlayerWithPlayer {
     id: row.id,
     base_price_lakhs: row.base_price_lakhs,
     set_no: row.set_no,
+    sort_order: row.sort_order ?? 0,
     status: row.status,
     sold_to_team_id: row.sold_to_team_id,
     sold_price_lakhs: row.sold_price_lakhs,
+    sold_at: row.sold_at ?? null,
     players: player,
   };
 }
@@ -59,6 +64,7 @@ interface HostRoomState {
   rejoinRequests: DbRejoinRequest[];
   roomPlayers: RoomPlayerWithPlayer[];
   notices: DbNotice[];
+  auctionPhase: AuctionPhase | null;
   recentPlainCodes: Record<string, RecentCodeEntry>;
   loading: boolean;
   error: string | null;
@@ -91,6 +97,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
   rejoinRequests: [],
   roomPlayers: [],
   notices: [],
+  auctionPhase: null,
   recentPlainCodes: {},
   loading: true,
   error: null,
@@ -166,6 +173,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         rejoinRes,
         playersRes,
         noticesRes,
+        auctionStateRes,
       ] = await Promise.all([
         supabase
           .from('teams')
@@ -193,7 +201,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         supabase
           .from('room_players')
           .select(
-            'id, base_price_lakhs, set_no, status, sold_to_team_id, sold_price_lakhs, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)',
+            'id, base_price_lakhs, set_no, sort_order, status, sold_to_team_id, sold_price_lakhs, sold_at, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)',
           )
           .eq('room_id', roomId)
           .range(0, 999),
@@ -202,6 +210,11 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
           .select('id, room_id, message, opens_at, created_at')
           .eq('room_id', roomId)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('auction_state')
+          .select('phase')
+          .eq('room_id', roomId)
+          .maybeSingle(),
       ]);
 
       if (teamsRes.error) throw new Error(teamsRes.error.message);
@@ -231,6 +244,8 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         .map(normalizeRoomPlayer)
         .sort((a, b) => (a.players?.serial ?? 0) - (b.players?.serial ?? 0));
 
+      const phaseRow = auctionStateRes.data as { phase?: AuctionPhase } | null;
+
       set({
         room: typedRoom,
         teams: loadedTeams,
@@ -240,6 +255,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         rejoinRequests: (rejoinRes.data as DbRejoinRequest[]) ?? [],
         roomPlayers: normalizedPlayers,
         notices: (noticesRes.data as DbNotice[]) ?? [],
+        auctionPhase: phaseRow?.phase ?? null,
         loading: false,
         error: null,
       });
@@ -393,9 +409,11 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
               id: string;
               base_price_lakhs: number;
               set_no: number;
+              sort_order: number;
               status: RoomPlayerStatus;
               sold_to_team_id: string | null;
               sold_price_lakhs: number | null;
+              sold_at: string | null;
             };
             set((state) => ({
               roomPlayers: state.roomPlayers.map((rp) =>
@@ -404,9 +422,11 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
                       ...rp,
                       base_price_lakhs: updated.base_price_lakhs,
                       set_no: updated.set_no,
+                      sort_order: updated.sort_order ?? rp.sort_order,
                       status: updated.status,
                       sold_to_team_id: updated.sold_to_team_id,
                       sold_price_lakhs: updated.sold_price_lakhs,
+                      sold_at: updated.sold_at ?? rp.sold_at,
                     }
                   : rp,
               ),
@@ -443,6 +463,26 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
             set((state) => ({
               notices: state.notices.filter((n) => n.id !== oldId),
             }));
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'auction_state',
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          if (
+            (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
+            payload.new
+          ) {
+            const row = payload.new as { phase?: AuctionPhase };
+            if (row.phase) {
+              set({ auctionPhase: row.phase });
+            }
           }
         },
       )
@@ -537,7 +577,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     const { data, error } = await supabase
       .from('room_players')
       .select(
-        'id, base_price_lakhs, set_no, status, sold_to_team_id, sold_price_lakhs, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)',
+        'id, base_price_lakhs, set_no, sort_order, status, sold_to_team_id, sold_price_lakhs, sold_at, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)',
       )
       .eq('room_id', roomId)
       .range(0, 999);
@@ -575,6 +615,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       rejoinRequests: [],
       roomPlayers: [],
       notices: [],
+      auctionPhase: null,
       recentPlainCodes: {},
       loading: true,
       error: null,

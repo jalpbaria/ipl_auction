@@ -38,6 +38,7 @@ export default function HostLayout() {
 
   const room = useHostRoom((s) => s.room);
   const rejoinRequests = useHostRoom((s) => s.rejoinRequests);
+  const auctionPhase = useHostRoom((s) => s.auctionPhase);
   const loading = useHostRoom((s) => s.loading);
   const error = useHostRoom((s) => s.error);
   const loadHostRoom = useHostRoom((s) => s.loadHostRoom);
@@ -99,47 +100,60 @@ export default function HostLayout() {
       label: 'Overview',
       icon: LayoutDashboard,
       badgeCount: 0,
+      liveDot: false,
+    },
+    {
+      to: `/host/${roomId}/auction`,
+      label: 'Auction Control',
+      icon: Gavel,
+      badgeCount: 0,
+      liveDot: auctionPhase === 'bidding',
     },
     {
       to: `/host/${roomId}/codes`,
       label: 'Team Codes',
       icon: KeyRound,
       badgeCount: 0,
+      liveDot: false,
     },
     {
       to: `/host/${roomId}/rejoin`,
       label: 'Re-entry Requests',
       icon: UserCheck,
       badgeCount: pendingRejoinCount,
+      liveDot: false,
     },
     {
       to: `/host/${roomId}/players`,
       label: 'Players',
       icon: Users,
       badgeCount: 0,
+      liveDot: false,
     },
     {
       to: `/host/${roomId}/notices`,
       label: 'Notices and Room Lock',
       icon: Bell,
       badgeCount: 0,
+      liveDot: false,
     },
     {
       to: `/host/${roomId}/purse`,
       label: 'Purse Control',
       icon: Coins,
       badgeCount: 0,
+      liveDot: false,
     },
     {
       to: `/host/${roomId}/settings`,
       label: 'Settings',
       icon: Settings,
       badgeCount: 0,
+      liveDot: false,
     },
   ];
 
   const disabledNavItems = [
-    { label: 'Auction Control', icon: Gavel },
     { label: 'Squad Analysis', icon: BarChart3 },
     { label: 'Leaderboard', icon: Trophy },
     { label: 'Reports', icon: FileText },
@@ -295,6 +309,19 @@ export default function HostLayout() {
                           {item.label}
                         </span>
                       </span>
+
+                      {item.liveDot && (
+                        <>
+                          <span
+                            aria-label="Auction live"
+                            className="hidden min-[1100px]:inline-block h-2 w-2 rounded-full bg-[#22D3EE] animate-pulse"
+                          />
+                          <span
+                            aria-label="Auction live"
+                            className="min-[1100px]:hidden absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-[#22D3EE] animate-pulse"
+                          />
+                        </>
+                      )}
 
                       {item.badgeCount > 0 && (
                         <>

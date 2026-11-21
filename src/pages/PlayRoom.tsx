@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Gavel,
   Loader2,
   RefreshCw,
   RotateCcw,
@@ -428,9 +429,15 @@ export default function PlayRoom() {
 
             <div className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-white/[0.08] pt-5">
               <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-[#8B95AA]">
-                WAITING FOR LIVE AUCTION STAGE
+                FRANCHISE CONSOLE READY
               </p>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Link to={`/play/${roomId}/auction`}>
+                  <Button variant="gold" size="sm">
+                    <Gavel className="h-3.5 w-3.5" />
+                    <span>Enter auction room</span>
+                  </Button>
+                </Link>
                 <Button variant="ghost" size="sm" onClick={() => void loadPlayData()}>
                   <RefreshCw className="h-3.5 w-3.5" />
                   <span>Refresh</span>

@@ -96,10 +96,37 @@ export interface RoomPlayerWithPlayer {
   id: string;
   base_price_lakhs: number;
   set_no: number;
+  sort_order: number;
   status: RoomPlayerStatus;
   sold_to_team_id: string | null;
   sold_price_lakhs: number | null;
+  sold_at: string | null;
   players: DbPlayer | null;
+}
+
+export type AuctionPhase = 'idle' | 'bidding' | 'sold' | 'unsold' | 'paused';
+
+export interface DbAuctionState {
+  room_id: string;
+  current_room_player_id: string | null;
+  phase: AuctionPhase;
+  current_bid_lakhs: number;
+  current_bid_team_id: string | null;
+  timer_ends_at: string | null;
+  bid_seq: number;
+  current_set_no: number;
+  paused_remaining_ms: number | null;
+  updated_at: string;
+}
+
+export interface DbBid {
+  id: string;
+  room_id: string;
+  room_player_id: string;
+  team_id: string;
+  amount_lakhs: number;
+  voided: boolean;
+  created_at: string;
 }
 
 export interface DbViolation {
