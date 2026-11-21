@@ -88,7 +88,7 @@ export function JoinRoomPanel() {
         .from('rejoin_requests')
         .select('status')
         .eq('id', rejoinRequestId)
-        .single();
+        .maybeSingle();
 
       if (cancelled || error || !data) return;
 
