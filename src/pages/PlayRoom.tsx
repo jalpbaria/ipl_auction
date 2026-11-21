@@ -7,15 +7,13 @@ import { Card } from '../components/ui/Card';
 import { formatLakhs } from '../lib/format';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/auth';
+import type { DbRoom, DbTeam, DbTeamFinance } from '../types/database';
 
-interface MyTeamDetail {
-  id: string;
-  code: string;
-  name: string;
-  status: string;
-  room_id: string;
-  rooms: { name: string } | { name: string }[] | null;
-}
+type MyTeamDetail = Pick<DbTeam, 'id' | 'short_code' | 'name' | 'status' | 'room_id'> & {
+  rooms: Pick<DbRoom, 'name'> | Pick<DbRoom, 'name'>[] | null;
+};
+
+type MyTeamFinance = Pick<DbTeamFinance, 'purse_left_lakhs'>;
 
 function getRoomName(rooms: MyTeamDetail['rooms']): string {
   if (!rooms) return 'Auction Room';
@@ -45,7 +43,7 @@ export default function PlayRoom() {
     try {
       const { data: teamData, error: teamErr } = await supabase
         .from('teams')
-        .select('id, code, name, status, room_id, rooms(name)')
+        .select('id, short_code, name, status, room_id, rooms(name)')
         .eq('room_id', roomId)
         .eq('leader_id', userId)
         .single();
@@ -71,9 +69,10 @@ export default function PlayRoom() {
         );
       }
 
+      const typedFinance = financeData as MyTeamFinance | null;
       setPurseLeftLakhs(
-        typeof financeData?.purse_left_lakhs === 'number'
-          ? financeData.purse_left_lakhs
+        typeof typedFinance?.purse_left_lakhs === 'number'
+          ? typedFinance.purse_left_lakhs
           : 0,
       );
     } catch (err) {
@@ -152,7 +151,7 @@ export default function PlayRoom() {
             <div className="mt-6 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <p className="font-mono text-xs uppercase tracking-[0.12em] text-[#22D3EE]">
-                  FRANCHISE CODE // {team?.code}
+                  FRANCHISE CODE // {team?.short_code}
                 </p>
                 <h1 className="mt-1 font-display text-4xl sm:text-5xl tracking-wide text-[#E8ECF4]">
                   {team?.name}

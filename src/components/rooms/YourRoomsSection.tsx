@@ -3,25 +3,16 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/auth';
+import type { DbRoom, DbTeam } from '../../types/database';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
-interface HostedRoomRow {
-  id: string;
-  name: string;
-  created_at: string;
-  status: string;
-}
+type HostedRoomRow = Pick<DbRoom, 'id' | 'name' | 'created_at' | 'status'>;
 
-interface JoinedTeamRow {
-  id: string;
-  room_id: string;
-  code: string;
-  name: string;
-  status: string;
-  rooms: { name: string } | { name: string }[] | null;
-}
+type JoinedTeamRow = Pick<DbTeam, 'id' | 'room_id' | 'short_code' | 'name' | 'status'> & {
+  rooms: Pick<DbRoom, 'name'> | Pick<DbRoom, 'name'>[] | null;
+};
 
 function formatShortDate(iso: string): string {
   try {
@@ -67,7 +58,7 @@ export function YourRoomsSection() {
           .order('created_at', { ascending: false }),
         supabase
           .from('teams')
-          .select('*, rooms(name)')
+          .select('id, room_id, short_code, name, status, rooms(name)')
           .eq('leader_id', userId)
           .eq('status', 'active'),
       ]);
@@ -211,7 +202,7 @@ export function YourRoomsSection() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2.5">
                       <span className="font-mono text-xs font-bold text-[#22D3EE]">
-                        {team.code}
+                        {team.short_code}
                       </span>
                       <p className="truncate font-sans text-sm font-semibold text-[#E8ECF4]">
                         {team.name}

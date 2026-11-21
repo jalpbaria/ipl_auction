@@ -1,18 +1,17 @@
 import type { Session, User } from '@supabase/supabase-js';
 import { create } from 'zustand';
 import { isSupabaseConfigured, supabase } from '../lib/supabase';
+import type { DbProfile } from '../types/database';
 import { RULES_ACCEPTED_STORAGE_KEY, useAuctionStore } from './useAuctionStore';
 
 export const DEVICE_ID_STORAGE_KEY = 'ipl_device_id';
 export const DEVICE_LIMIT_ERROR_MESSAGE =
   'You were signed out because this account is logged in on more than 5 devices.';
 
-export interface UserProfile {
-  id: string;
-  full_name: string;
-  email: string;
-  rules_accepted_at: string | null;
-}
+export type UserProfile = Pick<
+  DbProfile,
+  'id' | 'full_name' | 'email' | 'rules_accepted_at'
+>;
 
 function getOrCreateDeviceId(): string {
   if (typeof window === 'undefined') {

@@ -7,27 +7,16 @@ import { Card } from '../components/ui/Card';
 import { CornerBrackets } from '../components/ui/CornerBrackets';
 import { formatLakhs } from '../lib/format';
 import { supabase } from '../lib/supabase';
+import type { DbRoom, DbTeam } from '../types/database';
 
-interface RoomDetail {
-  id: string;
-  name: string;
-  status: string;
-  purse_lakhs?: number | null;
-}
-
-interface TeamRow {
-  id: string;
-  code: string;
-  name: string;
-  status: string;
-  leader_name?: string | null;
-}
+type HostRoomDetail = Pick<DbRoom, 'id' | 'name' | 'status' | 'starting_purse_lakhs'>;
+type HostTeamRow = Pick<DbTeam, 'id' | 'short_code' | 'name' | 'status' | 'leader_name'>;
 
 export default function HostRoom() {
   const { roomId } = useParams<{ roomId: string }>();
 
-  const [room, setRoom] = useState<RoomDetail | null>(null);
-  const [teams, setTeams] = useState<TeamRow[]>([]);
+  const [room, setRoom] = useState<HostRoomDetail | null>(null);
+  const [teams, setTeams] = useState<HostTeamRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,14 +34,14 @@ export default function HostRoom() {
       const [roomRes, teamsRes] = await Promise.all([
         supabase
           .from('rooms')
-          .select('id, name, status, purse_lakhs')
+          .select('id, name, status, starting_purse_lakhs')
           .eq('id', roomId)
           .single(),
         supabase
           .from('teams')
-          .select('id, code, name, status, leader_name')
+          .select('id, short_code, name, status, leader_name')
           .eq('room_id', roomId)
-          .order('code', { ascending: true }),
+          .order('short_code', { ascending: true }),
       ]);
 
       if (roomRes.error) {
@@ -62,8 +51,8 @@ export default function HostRoom() {
         throw new Error(teamsRes.error.message || 'Unable to load room teams.');
       }
 
-      setRoom(roomRes.data as RoomDetail);
-      setTeams((teamsRes.data as TeamRow[]) ?? []);
+      setRoom(roomRes.data as HostRoomDetail);
+      setTeams((teamsRes.data as HostTeamRow[]) ?? []);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to fetch host room data.',
@@ -144,13 +133,13 @@ export default function HostRoom() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  {typeof room?.purse_lakhs === 'number' && (
+                  {typeof room?.starting_purse_lakhs === 'number' && (
                     <div className="rounded-[4px] border border-white/[0.08] bg-[#070B14] px-4 py-2.5">
                       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#8B95AA]">
                         STARTING PURSE
                       </p>
                       <p className="mt-1 font-mono text-base font-semibold text-[#F5B921] tabular-nums">
-                        {formatLakhs(room.purse_lakhs)}
+                        {formatLakhs(room.starting_purse_lakhs)}
                       </p>
                     </div>
                   )}
@@ -194,7 +183,7 @@ export default function HostRoom() {
                         />
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-mono text-sm font-bold text-[#F5B921]">
-                            {team.code}
+                            {team.short_code}
                           </span>
                           <Badge tone={isActive ? 'cyan' : 'neutral'}>
                             {team.status}
