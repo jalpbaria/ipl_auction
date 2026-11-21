@@ -1,0 +1,6 @@
+{
+  "name": "IPL Auction",
+  "description": "Multiplayer live cricket franchise auction platform for college tournaments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
