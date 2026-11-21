@@ -193,7 +193,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         supabase
           .from('room_players')
           .select(
-            'id, base_price_lakhs, set_no, status, sold_to_team_id, sold_price_lakhs, players(*)',
+            'id, base_price_lakhs, set_no, status, sold_to_team_id, sold_price_lakhs, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)',
           )
           .eq('room_id', roomId)
           .range(0, 999),
@@ -537,7 +537,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     const { data, error } = await supabase
       .from('room_players')
       .select(
-        'id, base_price_lakhs, set_no, status, sold_to_team_id, sold_price_lakhs, players(*)',
+        'id, base_price_lakhs, set_no, status, sold_to_team_id, sold_price_lakhs, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)',
       )
       .eq('room_id', roomId)
       .range(0, 999);

@@ -16,27 +16,27 @@ import { CornerBrackets } from '../../components/ui/CornerBrackets';
 import { FormField, INPUT_BASE_CLASS } from '../../components/ui/FormField';
 import { Modal } from '../../components/ui/Modal';
 import { Tag } from '../../components/ui/Tag';
+import {
+  getCategoryInfo,
+  getSkillInfo,
+  PLAYER_CATEGORIES,
+  PLAYER_CATEGORY_MAP,
+  type PlayerCategory,
+} from '../../data/categories';
 import { formatLakhs } from '../../lib/format';
 import { supabase } from '../../lib/supabase';
 import { useHostRoom } from '../../store/hostRoom';
 import { useToastStore } from '../../store/toast';
-import type {
-  PlayerCategory,
-  RoomPlayerStatus,
-  RoomPlayerWithPlayer,
-} from '../../types/database';
+import type { RoomPlayerStatus, RoomPlayerWithPlayer } from '../../types/database';
 
 type CategoryTab = 'All' | PlayerCategory;
 
-const CATEGORY_TABS: CategoryTab[] = [
-  'All',
-  'Legends',
-  'Marquee',
-  'Batsman',
-  'Bowler',
-  'Wicketkeeper',
-  'Allrounder',
-];
+function formatRateStat(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) {
+    return '-';
+  }
+  return value.toFixed(2);
+}
 
 function getStatusBadge(status: RoomPlayerStatus): {
   label: string;
@@ -46,6 +46,34 @@ function getStatusBadge(status: RoomPlayerStatus): {
   if (status === 'sold') return { label: 'SOLD', tone: 'gold' };
   if (status === 'unsold') return { label: 'UNSOLD', tone: 'danger' };
   return { label: 'PENDING', tone: 'neutral' };
+}
+
+function RoleChip({ skill }: { skill: string | null | undefined }) {
+  if (!skill) return null;
+  const info = getSkillInfo(skill);
+  return (
+    <span
+      className={`inline-flex items-center rounded-[2px] border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] whitespace-nowrap shrink-0 ${
+        info?.chipClass ?? 'border-white/15 bg-[#0E1524] text-[#8B95AA]'
+      }`}
+    >
+      {skill}
+    </span>
+  );
+}
+
+function CategoryChip({ category }: { category: string | null | undefined }) {
+  if (!category) return null;
+  const info = getCategoryInfo(category);
+  return (
+    <span
+      className={`inline-flex items-center rounded-[2px] border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] whitespace-nowrap shrink-0 ${
+        info?.chipClass ?? 'border-white/15 bg-[#141C2F] text-[#8B95AA]'
+      }`}
+    >
+      {info?.label ?? category}
+    </span>
+  );
 }
 
 function PlayerCardVisual({
@@ -60,6 +88,7 @@ function PlayerCardVisual({
   const fullName = p ? `${p.first_name} ${p.last_name}`.trim() : 'Unknown Player';
   const imageUrl = p?.card_image_url?.trim() || '';
   const showFallback = !imageUrl || imgFailed;
+  const categoryInfo = getCategoryInfo(p?.category);
 
   return (
     <div className="relative aspect-[687/1024] w-full overflow-hidden rounded-[4px] border border-[#F5B921]/70 bg-[#070B14]">
@@ -78,14 +107,18 @@ function PlayerCardVisual({
 
           <div className="flex items-center justify-between gap-2 border-b border-white/[0.08] pb-2">
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#F5B921]">
-              #{p?.serial ?? '—'}
+              {p?.player_code || `#${p?.serial ?? '—'}`}
             </span>
-            <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#22D3EE]">
-              {p?.category ?? 'PLAYER'}
+            <span
+              className={`font-mono text-[10px] uppercase tracking-[0.08em] ${
+                categoryInfo?.textClass ?? 'text-[#22D3EE]'
+              }`}
+            >
+              {categoryInfo?.label ?? p?.category ?? 'PLAYER'}
             </span>
           </div>
 
-          <div className="my-auto py-2 text-center">
+          <div className="my-auto flex flex-col items-center py-2 text-center">
             <p
               className={`font-display leading-none tracking-wide text-[#E8ECF4] ${
                 large ? 'text-4xl' : 'text-2xl'
@@ -94,9 +127,9 @@ function PlayerCardVisual({
               {fullName}
             </p>
             {p?.skill && (
-              <p className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#8B95AA]">
-                {p.skill}
-              </p>
+              <div className="mt-2.5">
+                <RoleChip skill={p.skill} />
+              </div>
             )}
           </div>
 
@@ -111,7 +144,7 @@ function PlayerCardVisual({
             </div>
             <div className="flex justify-between">
               <span className="text-[#8B95AA]">SR</span>
-              <span className="text-[#E8ECF4]">{p?.strike_rate ?? 0}</span>
+              <span className="text-[#E8ECF4]">{formatRateStat(p?.strike_rate)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-[#8B95AA]">WKTS</span>
@@ -119,7 +152,7 @@ function PlayerCardVisual({
             </div>
             <div className="col-span-2 flex justify-between border-t border-white/[0.06] pt-1">
               <span className="text-[#8B95AA]">ECON</span>
-              <span className="text-[#F5B921]">{p?.economy ?? 0}</span>
+              <span className="text-[#F5B921]">{formatRateStat(p?.economy)}</span>
             </div>
           </div>
         </div>
@@ -153,22 +186,17 @@ export default function HostPlayers() {
   const [detailPlayer, setDetailPlayer] = useState<RoomPlayerWithPlayer | null>(null);
 
   const categoryCounts = useMemo(() => {
-    const counts: Record<CategoryTab, number> = {
-      All: roomPlayers.length,
-      Legends: 0,
-      Marquee: 0,
-      Batsman: 0,
-      Bowler: 0,
-      Wicketkeeper: 0,
-      Allrounder: 0,
-    };
+    const counts: Record<string, number> = { All: roomPlayers.length };
+    for (const cat of PLAYER_CATEGORIES) {
+      counts[cat.value] = 0;
+    }
     for (const rp of roomPlayers) {
       const cat = rp.players?.category;
       if (cat && cat in counts) {
         counts[cat] += 1;
       }
     }
-    return counts;
+    return counts as Record<CategoryTab, number>;
   }, [roomPlayers]);
 
   const filteredPlayers = useMemo(() => {
@@ -183,9 +211,15 @@ export default function HostPlayers() {
 
       if (!q) return true;
       const fullName = `${p.first_name} ${p.last_name}`.toLowerCase();
+      const code = (p.player_code || '').toLowerCase();
       const team = (p.ipl_team || '').toLowerCase();
       const nat = (p.nationality || '').toLowerCase();
-      return fullName.includes(q) || team.includes(q) || nat.includes(q);
+      return (
+        fullName.includes(q) ||
+        code.includes(q) ||
+        team.includes(q) ||
+        nat.includes(q)
+      );
     });
   }, [roomPlayers, activeCategory, searchQuery]);
 
@@ -266,11 +300,12 @@ export default function HostPlayers() {
       }
 
       const updatedCount = typeof data === 'number' ? data : Number(data ?? 0);
+      const label = PLAYER_CATEGORY_MAP[activeCategory]?.label ?? activeCategory;
       await refreshRoomPlayers();
       setCategoryModalOpen(false);
       showToast({
         title: `Updated ${Number.isFinite(updatedCount) ? updatedCount : 0} players`,
-        description: `${activeCategory} pending players set to ${formatLakhs(Math.round(lakhs))}.`,
+        description: `${label} pending players set to ${formatLakhs(Math.round(lakhs))}.`,
         tone: 'success',
       });
     } catch (err) {
@@ -286,6 +321,9 @@ export default function HostPlayers() {
 
   const parsedInline = Number(editLakhs);
   const parsedCategory = Number(categoryLakhs);
+  const activeCategoryInfo =
+    activeCategory !== 'All' ? PLAYER_CATEGORY_MAP[activeCategory] : null;
+  const detailCategoryInfo = getCategoryInfo(detailPlayer?.players?.category);
 
   return (
     <div className="space-y-6">
@@ -358,28 +396,52 @@ export default function HostPlayers() {
           aria-label="Player category filter"
           className="flex flex-wrap items-center gap-1.5"
         >
-          {CATEGORY_TABS.map((cat) => {
-            const isActive = activeCategory === cat;
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeCategory === 'All'}
+            onClick={() => setActiveCategory('All')}
+            className={`inline-flex items-center gap-2 rounded-[4px] border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors whitespace-nowrap shrink-0 ${
+              activeCategory === 'All'
+                ? 'border-[#F5B921] bg-[#F5B921] font-semibold text-[#070B14]'
+                : 'border-white/10 bg-[#0E1524] text-[#8B95AA] hover:border-white/25 hover:text-[#E8ECF4]'
+            }`}
+          >
+            <span>All</span>
+            <span
+              className={`tabular-nums ${
+                activeCategory === 'All' ? 'text-[#070B14]/80' : 'text-[#8B95AA]'
+              }`}
+            >
+              {categoryCounts.All}
+            </span>
+          </button>
+
+          {PLAYER_CATEGORIES.map((cat) => {
+            const isActive = activeCategory === cat.value;
             return (
               <button
-                key={cat}
+                key={cat.value}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
-                onClick={() => setActiveCategory(cat)}
+                onClick={() => setActiveCategory(cat.value)}
                 className={`inline-flex items-center gap-2 rounded-[4px] border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors whitespace-nowrap shrink-0 ${
                   isActive
-                    ? 'border-[#F5B921] bg-[#F5B921] font-semibold text-[#070B14]'
+                    ? `${cat.activeTabClass} font-semibold`
                     : 'border-white/10 bg-[#0E1524] text-[#8B95AA] hover:border-white/25 hover:text-[#E8ECF4]'
                 }`}
               >
-                <span>{cat}</span>
+                <span className={isActive ? 'text-[#070B14]/70' : cat.textClass}>
+                  S{cat.setNo}
+                </span>
+                <span>{cat.label}</span>
                 <span
                   className={`tabular-nums ${
                     isActive ? 'text-[#070B14]/80' : 'text-[#8B95AA]'
                   }`}
                 >
-                  {categoryCounts[cat]}
+                  {categoryCounts[cat.value]}
                 </span>
               </button>
             );
@@ -395,7 +457,7 @@ export default function HostPlayers() {
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search name, IPL team, nationality"
+            placeholder="Search name, code, IPL team, nationality"
             aria-label="Search players"
             className={`${INPUT_BASE_CLASS} pl-9 py-2 text-xs`}
           />
@@ -444,13 +506,22 @@ export default function HostPlayers() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="font-mono text-[11px] text-[#8B95AA]">
-                      {p.nationality}
-                    </span>
+                    <RoleChip skill={p.skill} />
                     {p.is_overseas && <Tag accent="gold">OVERSEAS</Tag>}
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="truncate font-mono text-[#8B95AA]">
+                      {p.nationality}
+                    </span>
+                    {p.player_code && (
+                      <span className="font-mono text-[10px] uppercase tracking-[0.06em] text-[#F5B921] shrink-0">
+                        {p.player_code}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
                     <Badge tone={statusChip.tone}>{statusChip.label}</Badge>
                     <span className="font-mono text-[10px] text-[#8B95AA] tabular-nums">
                       SET {rp.set_no}
@@ -536,13 +607,14 @@ export default function HostPlayers() {
         /* Table View */
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1040px] border-collapse text-left">
+            <table className="w-full min-w-[1140px] border-collapse text-left">
               <thead>
                 <tr className="border-b border-white/[0.08] bg-[#141C2F] font-mono text-[10px] uppercase tracking-[0.1em] text-[#8B95AA]">
                   <th className="px-3 py-3">Serial</th>
+                  <th className="px-3 py-3">Code</th>
                   <th className="px-3 py-3">Name</th>
                   <th className="px-3 py-3">Category</th>
-                  <th className="px-3 py-3">Skill</th>
+                  <th className="px-3 py-3">Role</th>
                   <th className="px-3 py-3">Nationality</th>
                   <th className="px-3 py-3 text-right">Matches</th>
                   <th className="px-3 py-3 text-right">Runs</th>
@@ -568,6 +640,9 @@ export default function HostPlayers() {
                       <td className="px-3 py-2.5 font-mono text-[#8B95AA] tabular-nums">
                         {p.serial}
                       </td>
+                      <td className="px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.06em] text-[#F5B921] whitespace-nowrap">
+                        {p.player_code || '—'}
+                      </td>
                       <td className="px-3 py-2.5">
                         <button
                           type="button"
@@ -577,10 +652,12 @@ export default function HostPlayers() {
                           {fullName}
                         </button>
                       </td>
-                      <td className="px-3 py-2.5 font-mono text-[11px] text-[#22D3EE]">
-                        {p.category}
+                      <td className="px-3 py-2.5">
+                        <CategoryChip category={p.category} />
                       </td>
-                      <td className="px-3 py-2.5 text-[#8B95AA]">{p.skill}</td>
+                      <td className="px-3 py-2.5">
+                        <RoleChip skill={p.skill} />
+                      </td>
                       <td className="px-3 py-2.5">
                         <span className="text-[#E8ECF4]">{p.nationality}</span>
                         {p.is_overseas && (
@@ -596,10 +673,10 @@ export default function HostPlayers() {
                         {p.runs}
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono tabular-nums">
-                        {p.strike_rate}
+                        {formatRateStat(p.strike_rate)}
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono tabular-nums">
-                        {p.economy}
+                        {formatRateStat(p.economy)}
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono tabular-nums">
                         {p.wickets}
@@ -665,14 +742,21 @@ export default function HostPlayers() {
       <Modal
         open={categoryModalOpen}
         onClose={() => !savingCategory && setCategoryModalOpen(false)}
-        eyebrow="BULK BASE PRICE"
-        title={`SET ${activeCategory.toUpperCase()} BASE PRICE`}
+        eyebrow={
+          activeCategoryInfo
+            ? `SET ${activeCategoryInfo.setNo} // BULK BASE PRICE`
+            : 'BULK BASE PRICE'
+        }
+        title={`SET ${(activeCategoryInfo?.label ?? activeCategory).toUpperCase()} BASE PRICE`}
         maxWidthClass="max-w-md"
       >
         <form onSubmit={handleSaveCategoryPrice} className="space-y-4">
           <p className="text-sm text-[#8B95AA]">
             Updates the base price for all pending players in the{' '}
-            <span className="text-[#E8ECF4]">{activeCategory}</span> category.
+            <span className={activeCategoryInfo?.textClass ?? 'text-[#E8ECF4]'}>
+              {activeCategoryInfo?.label ?? activeCategory}
+            </span>{' '}
+            category.
           </p>
 
           <FormField
@@ -736,7 +820,7 @@ export default function HostPlayers() {
         onClose={() => setDetailPlayer(null)}
         eyebrow={
           detailPlayer?.players
-            ? `SERIAL #${detailPlayer.players.serial} // ${detailPlayer.players.category.toUpperCase()}`
+            ? `${detailPlayer.players.player_code} // SERIAL #${detailPlayer.players.serial}`
             : 'PLAYER PROFILE'
         }
         title={
@@ -764,11 +848,27 @@ export default function HostPlayers() {
                 <Badge tone={getStatusBadge(detailPlayer.status).tone}>
                   {detailPlayer.status.toUpperCase()}
                 </Badge>
+                <CategoryChip category={detailPlayer.players.category} />
+                <RoleChip skill={detailPlayer.players.skill} />
                 {detailPlayer.players.is_overseas && <Tag accent="gold">OVERSEAS</Tag>}
                 <Tag accent="cyan">SET {detailPlayer.set_no}</Tag>
               </div>
 
               <div className="grid grid-cols-2 gap-3 rounded-[4px] border border-white/[0.08] bg-[#070B14] p-4 text-xs">
+                <div>
+                  <p className="font-mono text-[10px] uppercase text-[#8B95AA]">
+                    PLAYER CODE
+                  </p>
+                  <p className="mt-0.5 font-mono font-medium text-[#F5B921]">
+                    {detailPlayer.players.player_code || '—'}
+                  </p>
+                </div>
+                <div>
+                  <p className="font-mono text-[10px] uppercase text-[#8B95AA]">ROLE</p>
+                  <p className="mt-0.5 font-medium text-[#E8ECF4]">
+                    {detailPlayer.players.skill}
+                  </p>
+                </div>
                 <div>
                   <p className="font-mono text-[10px] uppercase text-[#8B95AA]">
                     NATIONALITY
@@ -778,9 +878,16 @@ export default function HostPlayers() {
                   </p>
                 </div>
                 <div>
-                  <p className="font-mono text-[10px] uppercase text-[#8B95AA]">SKILL</p>
-                  <p className="mt-0.5 font-medium text-[#E8ECF4]">
-                    {detailPlayer.players.skill}
+                  <p className="font-mono text-[10px] uppercase text-[#8B95AA]">
+                    AUCTION SET
+                  </p>
+                  <p
+                    className={`mt-0.5 font-mono font-medium ${
+                      detailCategoryInfo?.textClass ?? 'text-[#E8ECF4]'
+                    }`}
+                  >
+                    Set {detailCategoryInfo?.setNo ?? detailPlayer.set_no} ·{' '}
+                    {detailCategoryInfo?.label ?? detailPlayer.players.category}
                   </p>
                 </div>
                 <div>
@@ -817,7 +924,7 @@ export default function HostPlayers() {
                 <div className="rounded-[4px] border border-white/[0.08] bg-[#070B14] p-3">
                   <p className="text-[10px] text-[#8B95AA]">STRIKE RATE</p>
                   <p className="mt-1 text-base font-semibold text-[#E8ECF4]">
-                    {detailPlayer.players.strike_rate}
+                    {formatRateStat(detailPlayer.players.strike_rate)}
                   </p>
                 </div>
                 <div className="rounded-[4px] border border-white/[0.08] bg-[#070B14] p-3">
@@ -829,7 +936,7 @@ export default function HostPlayers() {
                 <div className="rounded-[4px] border border-white/[0.08] bg-[#070B14] p-3">
                   <p className="text-[10px] text-[#8B95AA]">ECONOMY</p>
                   <p className="mt-1 text-base font-semibold text-[#E8ECF4]">
-                    {detailPlayer.players.economy}
+                    {formatRateStat(detailPlayer.players.economy)}
                   </p>
                 </div>
                 <div className="rounded-[4px] border border-[#F5B921]/35 bg-[#070B14] p-3">

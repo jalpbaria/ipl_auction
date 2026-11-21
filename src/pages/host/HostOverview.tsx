@@ -3,6 +3,7 @@ import { TeamCrest } from '../../components/host/TeamCrest';
 import { Badge } from '../../components/ui/Badge';
 import { Card } from '../../components/ui/Card';
 import { CornerBrackets } from '../../components/ui/CornerBrackets';
+import { PLAYER_SKILLS, type PlayerSkill } from '../../data/categories';
 import { formatLakhs } from '../../lib/format';
 import { useHostRoom } from '../../store/hostRoom';
 import type { TeamStatus } from '../../types/database';
@@ -25,14 +26,25 @@ export default function HostOverview() {
   const playerStats = useMemo(() => {
     let indian = 0;
     let overseas = 0;
+    const bySkill: Record<PlayerSkill, number> = {
+      Batter: 0,
+      'All-Rounder': 0,
+      Wicketkeeper: 0,
+      Bowler: 0,
+    };
     for (const rp of roomPlayers) {
-      if (rp.players?.is_overseas) {
+      const p = rp.players;
+      if (!p) continue;
+      if (p.is_overseas) {
         overseas += 1;
-      } else if (rp.players) {
+      } else {
         indian += 1;
       }
+      if (p.skill in bySkill) {
+        bySkill[p.skill] += 1;
+      }
     }
-    return { total: roomPlayers.length, indian, overseas };
+    return { total: roomPlayers.length, indian, overseas, bySkill };
   }, [roomPlayers]);
 
   const activeTeamsCount = useMemo(
@@ -87,6 +99,17 @@ export default function HostOverview() {
           <p className="mt-2 font-mono text-[11px] text-[#22D3EE] tabular-nums">
             {playerStats.indian} Indian · {playerStats.overseas} Overseas
           </p>
+          <div className="mt-3 space-y-1 border-t border-white/[0.08] pt-2.5">
+            {PLAYER_SKILLS.map((role) => (
+              <div
+                key={role.value}
+                className="flex items-center justify-between font-mono text-[11px] text-[#8B95AA] tabular-nums"
+              >
+                <span>{role.pluralLabel}</span>
+                <span className="text-[#E8ECF4]">{playerStats.bySkill[role.value]}</span>
+              </div>
+            ))}
+          </div>
         </Card>
 
         <Card brackets bracketTone="gold" className="p-5">

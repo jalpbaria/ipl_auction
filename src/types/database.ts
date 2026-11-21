@@ -1,3 +1,5 @@
+import type { PlayerCategory, PlayerSkill } from '../data/categories';
+
 export interface DbRoom {
   id: string;
   host_id: string;
@@ -52,21 +54,16 @@ export interface DbTeamMember {
   created_at: string;
 }
 
-export type PlayerCategory =
-  | 'Legends'
-  | 'Marquee'
-  | 'Batsman'
-  | 'Bowler'
-  | 'Wicketkeeper'
-  | 'Allrounder';
+export type { PlayerCategory, PlayerSkill };
 
 export interface DbPlayer {
   id: string;
   serial: number;
+  player_code: string;
   first_name: string;
   last_name: string;
   category: PlayerCategory;
-  skill: string;
+  skill: PlayerSkill;
   nationality: string;
   is_overseas: boolean;
   ipl_season: string | null;
