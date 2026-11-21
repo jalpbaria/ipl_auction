@@ -1,6 +1,8 @@
-import { BookOpen, Check, Menu, Play, X } from 'lucide-react';
+import { BookOpen, Check, LogOut, Menu, Play, User, X } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../../store/auth';
+import { useToastStore } from '../../store/toast';
 import { useAuctionStore } from '../../store/useAuctionStore';
 import { Button } from '../ui/Button';
 
@@ -14,11 +16,35 @@ export function Navbar() {
   const navigate = useNavigate();
   const rulesAccepted = useAuctionStore((s) => s.rulesAccepted);
   const openRuleBook = useAuctionStore((s) => s.openRuleBook);
+
+  const session = useAuthStore((s) => s.session);
+  const profile = useAuthStore((s) => s.profile);
+  const logout = useAuthStore((s) => s.logout);
+  const showToast = useToastStore((s) => s.showToast);
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const displayName =
+    profile?.full_name || session?.user.email?.split('@')[0] || 'Manager';
 
   const handleStartGame = () => {
     if (!rulesAccepted) return;
-    navigate('/login');
+    navigate(session ? '/rooms' : '/login');
+  };
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+      showToast({
+        title: 'Signed out',
+        description: 'Your device session has been closed.',
+        tone: 'info',
+      });
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   return (
@@ -48,8 +74,28 @@ export function Navbar() {
           ))}
         </nav>
 
-        {/* Zone 3: Rule Book + Start Game Actions */}
+        {/* Zone 3: User Session + Rule Book + Start Game */}
         <div className="hidden sm:flex items-center gap-3 shrink-0">
+          {session && (
+            <div className="flex items-center gap-2 border-r border-white/10 pr-3">
+              <span className="inline-flex items-center gap-1.5 font-mono text-xs text-[#E8ECF4] max-w-[140px] truncate">
+                <User className="h-3.5 w-3.5 shrink-0 text-[#22D3EE]" aria-hidden="true" />
+                <span className="truncate">{displayName}</span>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loggingOut}
+                onClick={handleLogout}
+                aria-label="Logout"
+                className="px-2.5 text-[#8B95AA] hover:text-[#E8ECF4]"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>{loggingOut ? 'Exiting...' : 'Logout'}</span>
+              </Button>
+            </div>
+          )}
+
           <Button
             variant="outline"
             size="sm"
@@ -75,7 +121,13 @@ export function Navbar() {
               size="sm"
               disabled={!rulesAccepted}
               onClick={handleStartGame}
-              title={!rulesAccepted ? 'Accept the rule book first' : 'Enter auction login'}
+              title={
+                !rulesAccepted
+                  ? 'Accept the rule book first'
+                  : session
+                    ? 'Select entry protocol'
+                    : 'Sign in to start'
+              }
               aria-describedby={!rulesAccepted ? 'start-game-tooltip' : undefined}
             >
               <Play className="h-3.5 w-3.5 fill-current" />
@@ -109,6 +161,24 @@ export function Navbar() {
       {/* Mobile collapsible menu */}
       {mobileMenuOpen && (
         <div className="border-t border-white/[0.08] bg-[#0E1524] px-4 py-4 sm:hidden">
+          {session && (
+            <div className="mb-3 flex items-center justify-between border-b border-white/[0.08] pb-3">
+              <span className="inline-flex items-center gap-2 font-mono text-xs text-[#E8ECF4]">
+                <User className="h-3.5 w-3.5 text-[#22D3EE]" />
+                <span>{displayName}</span>
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={loggingOut}
+                onClick={handleLogout}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Logout</span>
+              </Button>
+            </div>
+          )}
+
           <nav className="flex flex-col gap-3 border-b border-white/[0.08] pb-4">
             {NAV_LINKS.map((link) => (
               <a
@@ -121,6 +191,7 @@ export function Navbar() {
               </a>
             ))}
           </nav>
+
           <div className="mt-4 flex flex-col gap-2.5">
             <Button
               variant="outline"
@@ -138,8 +209,11 @@ export function Navbar() {
               variant="cyan"
               size="md"
               disabled={!rulesAccepted}
-              onClick={handleStartGame}
-              title={!rulesAccepted ? 'Accept the rule book first' : 'Enter auction login'}
+              onClick={() => {
+                setMobileMenuOpen(false);
+                handleStartGame();
+              }}
+              title={!rulesAccepted ? 'Accept the rule book first' : 'Start Game'}
               className="w-full"
             >
               <Play className="h-4 w-4 fill-current" />

@@ -1,6 +1,8 @@
 import { Check, ChevronDown } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RULE_BOOK_VERSION, RULE_SECTIONS } from '../../data/rules';
+import { useAuthStore } from '../../store/auth';
+import { useToastStore } from '../../store/toast';
 import { useAuctionStore } from '../../store/useAuctionStore';
 import { Button } from '../ui/Button';
 import { Modal } from '../ui/Modal';
@@ -11,10 +13,15 @@ export function RuleBookModal() {
   const closeRuleBook = useAuctionStore((s) => s.closeRuleBook);
   const acceptRules = useAuctionStore((s) => s.acceptRules);
 
+  const session = useAuthStore((s) => s.session);
+  const syncRulesAcceptedAt = useAuthStore((s) => s.syncRulesAcceptedAt);
+  const showToast = useToastStore((s) => s.showToast);
+
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
   const [scrollPercent, setScrollPercent] = useState(0);
   const [checked, setChecked] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const evaluateScroll = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -40,6 +47,7 @@ export function RuleBookModal() {
       setScrolledToBottom(false);
       setScrollPercent(0);
       setChecked(rulesAccepted);
+      setSaving(false);
       return;
     }
 
@@ -55,9 +63,25 @@ export function RuleBookModal() {
     };
   }, [open, rulesAccepted, evaluateScroll]);
 
-  const handleConfirmAccept = () => {
-    if (!scrolledToBottom || !checked) return;
-    acceptRules();
+  const handleConfirmAccept = async () => {
+    if (!scrolledToBottom || !checked || saving) return;
+
+    setSaving(true);
+    try {
+      acceptRules();
+      if (session) {
+        await syncRulesAcceptedAt();
+      }
+      showToast({
+        title: 'Rule book accepted',
+        description: session
+          ? 'Start Game is now unlocked for your account.'
+          : 'Start Game is now unlocked. Sign in to enter a room.',
+        tone: 'success',
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -107,7 +131,7 @@ export function RuleBookModal() {
               <input
                 type="checkbox"
                 checked={checked}
-                disabled={!scrolledToBottom}
+                disabled={!scrolledToBottom || saving}
                 onChange={(e) => setChecked(e.target.checked)}
                 className="mt-0.5 h-4 w-4 rounded-[2px] border border-white/25 bg-[#070B14] accent-[#22D3EE] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22D3EE]"
               />
@@ -123,10 +147,10 @@ export function RuleBookModal() {
               <Button
                 variant="cyan"
                 size="sm"
-                disabled={!scrolledToBottom || !checked}
+                disabled={!scrolledToBottom || !checked || saving}
                 onClick={handleConfirmAccept}
               >
-                Accept
+                {saving ? 'Saving...' : 'Accept'}
               </Button>
             </div>
           </div>
