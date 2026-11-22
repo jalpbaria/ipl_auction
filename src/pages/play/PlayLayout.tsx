@@ -1,11 +1,22 @@
-import { ArrowLeft, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, Outlet, useParams } from 'react-router-dom';
+import {
+  ArrowLeft,
+  Gavel,
+  LayoutDashboard,
+  RefreshCw,
+  Shield,
+  Trophy,
+  Users,
+} from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
 import { FullscreenGuard } from '../../components/anticheat/FullscreenGuard';
 import { RemovedScreen } from '../../components/anticheat/RemovedScreen';
+import { TeamCrest } from '../../components/host/TeamCrest';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
+import { getTeamTheme } from '../../data/ipl-teams';
+import { formatLakhs } from '../../lib/format';
 import { supabase } from '../../lib/supabase';
 import { useToastStore } from '../../store/toast';
 import type {
@@ -13,6 +24,7 @@ import type {
   MyTeamStatus,
   ViolationType,
 } from '../../types/database';
+import { PlayThemeContext } from './playTheme';
 
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const LOAD_TIMEOUT_MS = 10_000;
@@ -50,6 +62,200 @@ async function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string
       window.clearTimeout(timeoutId);
     }
   }
+}
+
+interface ThemeProviderProps {
+  roomId: string;
+  teamId: string | null;
+  shortCode: string | null;
+  teamName: string | null;
+  children: React.ReactNode;
+}
+
+function ThemeProvider({
+  roomId,
+  teamId,
+  shortCode,
+  teamName,
+  children,
+}: ThemeProviderProps) {
+  const theme = useMemo(() => getTeamTheme(shortCode), [shortCode]);
+  const [purseLeftLakhs, setPurseLeftLakhs] = useState<number | null>(null);
+  const [spentLakhs, setSpentLakhs] = useState<number | null>(null);
+
+  const refreshPurse = useCallback(async () => {
+    if (!supabase || !teamId) return;
+    const { data, error } = await supabase
+      .from('team_finance')
+      .select('purse_left_lakhs, spent_lakhs')
+      .eq('team_id', teamId)
+      .maybeSingle();
+
+    if (!error && data) {
+      setPurseLeftLakhs(Number(data.purse_left_lakhs ?? 0));
+      setSpentLakhs(Number(data.spent_lakhs ?? 0));
+    }
+  }, [teamId]);
+
+  useEffect(() => {
+    if (!supabase || !teamId) return;
+    void refreshPurse();
+
+    const client = supabase;
+    const channel = client
+      .channel(`play-nav-finance-${teamId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'team_finance',
+          filter: `team_id=eq.${teamId}`,
+        },
+        (payload) => {
+          if (
+            (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
+            payload.new
+          ) {
+            const row = payload.new as {
+              purse_left_lakhs?: number;
+              spent_lakhs?: number;
+            };
+            if (typeof row.purse_left_lakhs === 'number') {
+              setPurseLeftLakhs(row.purse_left_lakhs);
+            }
+            if (typeof row.spent_lakhs === 'number') {
+              setSpentLakhs(row.spent_lakhs);
+            }
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [teamId, refreshPurse]);
+
+  const cssVars = useMemo(
+    () =>
+      ({
+        '--team-primary': theme.primary,
+        '--team-secondary': theme.secondary,
+        '--team-accent': theme.accent,
+        '--team-tint': theme.surfaceTint,
+        '--team-glow': theme.glow,
+      }) as React.CSSProperties,
+    [theme],
+  );
+
+  const contextValue = useMemo(
+    () => ({
+      roomId,
+      teamId,
+      shortCode,
+      teamName,
+      theme,
+      purseLeftLakhs,
+      spentLakhs,
+      refreshPurse,
+    }),
+    [roomId, teamId, shortCode, teamName, theme, purseLeftLakhs, spentLakhs, refreshPurse],
+  );
+
+  const navItems = [
+    { to: `/play/${roomId}`, label: 'Dashboard', icon: LayoutDashboard, end: true },
+    { to: `/play/${roomId}/auction`, label: 'Auction Room', icon: Gavel, end: false },
+    { to: `/play/${roomId}/xi`, label: 'Playing XI', icon: Users, end: false },
+    { to: `/play/${roomId}/leaderboard`, label: 'Leaderboard', icon: Trophy, end: false },
+  ];
+
+  return (
+    <PlayThemeContext.Provider value={contextValue}>
+      <div
+        style={cssVars}
+        className="min-h-screen bg-[#070B14] text-[#E8ECF4] flex flex-col"
+      >
+        {/* Compact Franchise Top Navigation */}
+        <header
+          style={{
+            borderBottomColor: theme.primary,
+            boxShadow: `0 2px 18px ${theme.glow}`,
+          }}
+          className="relative z-40 h-12 shrink-0 border-b bg-[#0E1524]"
+        >
+          <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-3 px-4 sm:px-6">
+            {/* Left: Mark + 4 Team Nav Tabs */}
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="hidden lg:flex items-center gap-2 shrink-0">
+                <Shield
+                  className="h-4 w-4 shrink-0"
+                  style={{ color: theme.highlight }}
+                  aria-hidden="true"
+                />
+                <span className="font-display text-xl tracking-[0.06em] text-[#E8ECF4]">
+                  IPL <span style={{ color: theme.highlight }}>AUCTION</span>
+                </span>
+                <span className="ml-1 h-4 w-px bg-white/15" aria-hidden="true" />
+              </div>
+
+              <nav aria-label="Franchise navigation" className="flex items-center gap-1 overflow-x-auto">
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.end}
+                      className={({ isActive }) =>
+                        `inline-flex items-center gap-1.5 rounded-[3px] border px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.07em] whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22D3EE] ${
+                          isActive
+                            ? 'border-[var(--team-primary)] bg-[var(--team-primary)] text-[var(--team-accent)]'
+                            : 'border-transparent text-[#8B95AA] hover:border-white/10 hover:bg-[#141C2F] hover:text-[#E8ECF4]'
+                        }`
+                      }
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </NavLink>
+                  );
+                })}
+              </nav>
+            </div>
+
+            {/* Right: Team Crest + Name + My Purse */}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                {shortCode && <TeamCrest shortCode={shortCode} size="sm" />}
+                <span className="hidden md:inline-block max-w-[180px] truncate font-sans text-xs font-semibold text-[#E8ECF4]">
+                  {teamName || 'Franchise'}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  borderColor: theme.primary,
+                  backgroundColor: theme.surfaceTint,
+                }}
+                className="flex items-center gap-2 rounded-[3px] border px-2.5 py-1"
+              >
+                <span className="hidden sm:inline font-mono text-[9px] uppercase tracking-[0.1em] text-[#8B95AA]">
+                  PURSE
+                </span>
+                <span className="font-mono text-xs font-bold text-[#F5B921] tabular-nums">
+                  {purseLeftLakhs !== null ? formatLakhs(purseLeftLakhs) : '—'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 min-w-0 flex flex-col">
+          <Outlet />
+        </div>
+      </div>
+    </PlayThemeContext.Provider>
+  );
 }
 
 export default function PlayLayout() {
@@ -404,7 +610,14 @@ export default function PlayLayout() {
       onRemoved={handleViolationRemoved}
       onAnticheatDisabled={() => setAnticheatEnabled(false)}
     >
-      <Outlet />
+      <ThemeProvider
+        roomId={roomId}
+        teamId={teamStatus.team_id}
+        shortCode={teamStatus.short_code}
+        teamName={teamStatus.name}
+      >
+        <Outlet />
+      </ThemeProvider>
     </FullscreenGuard>
   );
 }

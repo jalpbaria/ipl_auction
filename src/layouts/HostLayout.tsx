@@ -28,6 +28,7 @@ import {
   useNavigate,
   useParams,
 } from 'react-router-dom';
+import { openProjectorWindow } from '../components/host/ProjectorControlCard';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -257,6 +258,30 @@ export default function HostLayout() {
       liveDot: false,
     },
     {
+      to: `/host/${roomId}/analysis`,
+      label: 'Squad Analysis',
+      icon: BarChart3,
+      badgeCount: 0,
+      badgeTone: 'gold' as const,
+      liveDot: false,
+    },
+    {
+      to: `/host/${roomId}/leaderboard`,
+      label: 'Leaderboard',
+      icon: Trophy,
+      badgeCount: 0,
+      badgeTone: 'gold' as const,
+      liveDot: false,
+    },
+    {
+      to: `/host/${roomId}/projector`,
+      label: 'Projector Room',
+      icon: Tv,
+      badgeCount: 0,
+      badgeTone: 'gold' as const,
+      liveDot: false,
+    },
+    {
       to: `/host/${roomId}/settings`,
       label: 'Settings',
       icon: Settings,
@@ -264,12 +289,6 @@ export default function HostLayout() {
       badgeTone: 'gold' as const,
       liveDot: false,
     },
-  ];
-
-  const disabledNavItems = [
-    { label: 'Squad Analysis', icon: BarChart3 },
-    { label: 'Leaderboard', icon: Trophy },
-    { label: 'Projector Room', icon: Tv },
   ];
 
   if (loading) {
@@ -344,7 +363,7 @@ export default function HostLayout() {
             </span>
           </div>
 
-          {/* Right: Logged in as <email> + Sound Toggle + Disabled Open Projector + Logout */}
+          {/* Right: Logged in as <email> + Sound Toggle + Open Projector + Logout */}
           <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
             <span className="hidden xl:inline-block font-mono text-[11px] text-[#8B95AA] truncate max-w-[220px]">
               Logged in as <span className="text-[#E8ECF4]">{userEmail}</span>
@@ -371,25 +390,15 @@ export default function HostLayout() {
               </span>
             </button>
 
-            <div className="group relative inline-flex">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled
-                title="Available in a later phase"
-                aria-describedby="open-projector-tooltip"
-              >
-                <Monitor className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Open Projector</span>
-              </Button>
-              <div
-                id="open-projector-tooltip"
-                role="tooltip"
-                className="pointer-events-none absolute right-0 top-full mt-2 w-max rounded-[4px] border border-[#F5B921]/40 bg-[#141C2F] px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-[#F5B921] opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
-              >
-                Available in a later phase
-              </div>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openProjectorWindow(room.id)}
+              title="Open projector window"
+            >
+              <Monitor className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Open Projector</span>
+            </Button>
 
             <Button
               variant="ghost"
@@ -481,36 +490,6 @@ export default function HostLayout() {
                   );
                 })}
               </nav>
-            </div>
-
-            {/* Disabled SOON items */}
-            <div className="border-t border-white/[0.08] pt-4">
-              <p className="hidden min-[1100px]:block px-2.5 pb-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#8B95AA]/70">
-                UPCOMING MODULES
-              </p>
-              <div className="space-y-1">
-                {disabledNavItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <div
-                      key={item.label}
-                      title={`${item.label} (SOON)`}
-                      aria-disabled="true"
-                      className="flex cursor-not-allowed items-center justify-center min-[1100px]:justify-between gap-2 rounded-[4px] px-2.5 py-2 text-xs text-[#8B95AA]/45 select-none"
-                    >
-                      <span className="flex items-center gap-2.5 min-w-0">
-                        <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                        <span className="hidden min-[1100px]:inline truncate">
-                          {item.label}
-                        </span>
-                      </span>
-                      <span className="hidden min-[1100px]:inline-flex rounded-[2px] border border-white/10 bg-[#070B14] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-[#8B95AA]/70">
-                        SOON
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
           </div>
 

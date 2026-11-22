@@ -4,6 +4,7 @@ import type {
   AuctionPhase,
   DbNotice,
   DbPlayer,
+  DbPlayingXi,
   DbRejoinRequest,
   DbRoom,
   DbTeam,
@@ -91,7 +92,23 @@ export interface RecentCodeEntry {
 }
 
 const ROOM_SELECT =
-  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, bid_timer_seconds, auction_open, anticheat_enabled, status, created_at';
+  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, bid_timer_seconds, preview_seconds, auction_open, anticheat_enabled, projector_mode, leaderboard_public, status, created_at';
+
+function normalizePlayingXi(row: {
+  team_id: string;
+  room_id: string;
+  room_player_ids: string[] | null;
+  captain_room_player_id: string | null;
+  updated_at: string;
+}): DbPlayingXi {
+  return {
+    team_id: row.team_id,
+    room_id: row.room_id,
+    room_player_ids: Array.isArray(row.room_player_ids) ? row.room_player_ids : [],
+    captain_room_player_id: row.captain_room_player_id ?? null,
+    updated_at: row.updated_at,
+  };
+}
 
 interface HostRoomState {
   roomId: string | null;
@@ -106,6 +123,9 @@ interface HostRoomState {
   violations: ViolationWithTeam[];
   violationsLoading: boolean;
   violationsError: string | null;
+  playingXis: DbPlayingXi[];
+  playingXisLoading: boolean;
+  playingXisError: string | null;
   reportsSeenAtMs: number;
   lastHostRemovalAt: number | null;
   auctionPhase: AuctionPhase | null;
@@ -130,6 +150,7 @@ interface HostRoomState {
   refreshRoomPlayers: () => Promise<void>;
   refreshNotices: () => Promise<void>;
   refreshViolations: () => Promise<void>;
+  refreshPlayingXis: () => Promise<void>;
   reset: () => void;
 }
 
@@ -148,6 +169,9 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
   violations: [],
   violationsLoading: false,
   violationsError: null,
+  playingXis: [],
+  playingXisLoading: false,
+  playingXisError: null,
   reportsSeenAtMs: 0,
   lastHostRemovalAt: null,
   auctionPhase: null,
@@ -217,6 +241,8 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       error: null,
       violationsLoading: true,
       violationsError: null,
+      playingXisLoading: true,
+      playingXisError: null,
       reportsSeenAtMs: readReportsSeenAt(roomId),
     });
 
@@ -249,6 +275,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         noticesRes,
         auctionStateRes,
         violationsRes,
+        playingXiRes,
       ] = await Promise.all([
         supabase
           .from('teams')
@@ -295,6 +322,10 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
           .select('id, type, details, created_at, team_id, teams(short_code, name)')
           .eq('room_id', roomId)
           .order('created_at', { ascending: false }),
+        supabase
+          .from('playing_xi')
+          .select('team_id, room_id, room_player_ids, captain_room_player_id, updated_at')
+          .eq('room_id', roomId),
       ]);
 
       if (teamsRes.error) throw new Error(teamsRes.error.message);
@@ -330,6 +361,10 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         ? []
         : ((violationsRes.data as RawViolationRow[]) ?? []).map(normalizeViolation);
 
+      const loadedPlayingXis = playingXiRes.error
+        ? []
+        : ((playingXiRes.data as DbPlayingXi[]) ?? []).map(normalizePlayingXi);
+
       set({
         room: typedRoom,
         teams: loadedTeams,
@@ -342,6 +377,9 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         violations: loadedViolations,
         violationsLoading: false,
         violationsError: violationsRes.error ? violationsRes.error.message : null,
+        playingXis: loadedPlayingXis,
+        playingXisLoading: false,
+        playingXisError: playingXiRes.error ? playingXiRes.error.message : null,
         auctionPhase: phaseRow?.phase ?? null,
         loading: false,
         error: null,
@@ -350,6 +388,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       set({
         loading: false,
         violationsLoading: false,
+        playingXisLoading: false,
         error:
           err instanceof Error ? err.message : 'Unable to load host command console.',
       });
@@ -608,6 +647,43 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
           }
         },
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'playing_xi',
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          if (
+            (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
+            payload.new
+          ) {
+            const row = normalizePlayingXi(payload.new as DbPlayingXi);
+            set((state) => {
+              const idx = state.playingXis.findIndex(
+                (xi) => xi.team_id === row.team_id,
+              );
+              if (idx === -1) {
+                return { playingXis: [...state.playingXis, row] };
+              }
+              const next = state.playingXis.slice();
+              next[idx] = row;
+              return { playingXis: next };
+            });
+          } else if (payload.eventType === 'DELETE' && payload.old) {
+            const oldTeamId = (payload.old as { team_id?: string }).team_id;
+            if (oldTeamId) {
+              set((state) => ({
+                playingXis: state.playingXis.filter(
+                  (xi) => xi.team_id !== oldTeamId,
+                ),
+              }));
+            }
+          }
+        },
+      )
       .subscribe();
 
     return () => {
@@ -749,6 +825,32 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     });
   },
 
+  refreshPlayingXis: async () => {
+    const { roomId } = get();
+    if (!supabase || !roomId) return;
+
+    set({ playingXisLoading: true, playingXisError: null });
+    const { data, error } = await supabase
+      .from('playing_xi')
+      .select('team_id, room_id, room_player_ids, captain_room_player_id, updated_at')
+      .eq('room_id', roomId);
+
+    if (error) {
+      set({
+        playingXisLoading: false,
+        playingXisError: error.message || 'Unable to load playing XIs.',
+      });
+      return;
+    }
+
+    const normalized = ((data as DbPlayingXi[]) ?? []).map(normalizePlayingXi);
+    set({
+      playingXis: normalized,
+      playingXisLoading: false,
+      playingXisError: null,
+    });
+  },
+
   reset: () => {
     codeTimers.forEach((timerId) => window.clearTimeout(timerId));
     codeTimers.clear();
@@ -765,6 +867,9 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       violations: [],
       violationsLoading: false,
       violationsError: null,
+      playingXis: [],
+      playingXisLoading: false,
+      playingXisError: null,
       reportsSeenAtMs: 0,
       lastHostRemovalAt: null,
       auctionPhase: null,

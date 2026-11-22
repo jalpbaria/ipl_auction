@@ -1,5 +1,5 @@
 import { PLAYER_CATEGORIES, type PlayerCategoryInfo } from '../data/categories';
-import type { AuctionPhase, DbAuctionState } from '../types/database';
+import type { AuctionPhase, DbAuctionState, DbRoom } from '../types/database';
 
 export const PHASE_LABEL: Record<AuctionPhase, string> = {
   idle: 'STANDBY',
@@ -8,6 +8,113 @@ export const PHASE_LABEL: Record<AuctionPhase, string> = {
   unsold: 'UNSOLD',
   paused: 'PAUSED',
 };
+
+export interface RevealState {
+  active: boolean;
+  elapsedMs: number;
+  remainingMs: number;
+  durationMs: number;
+}
+
+export interface SetProgress {
+  setNo: number;
+  setLabel: string;
+  total: number;
+  remaining: number;
+  done: number;
+}
+
+export interface SetOverviewItem {
+  setNo: number;
+  label: string;
+  total: number;
+  remaining: number;
+  done: number;
+}
+
+export function normalizeSetProgress(
+  data: unknown,
+  fallbackSetNo?: number | null,
+): SetProgress | null {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== 'object') return null;
+  const r = row as Record<string, unknown>;
+  const rawSetNo = Number(r.set_no ?? fallbackSetNo ?? 1);
+  const setNo = Number.isFinite(rawSetNo) && rawSetNo >= 1 ? rawSetNo : 1;
+  const catInfo = getSetCategoryInfo(setNo);
+  return {
+    setNo,
+    setLabel: catInfo?.label ?? `Set ${setNo}`,
+    total: Math.max(0, Number(r.total ?? 0)),
+    remaining: Math.max(0, Number(r.remaining ?? 0)),
+    done: Math.max(0, Number(r.done ?? 0)),
+  };
+}
+
+export function normalizeSetsOverview(data: unknown): SetOverviewItem[] {
+  const rows = Array.isArray(data) ? data : [];
+  const bySetNo = new Map<number, Record<string, unknown>>();
+  for (const item of rows) {
+    if (item && typeof item === 'object') {
+      const rec = item as Record<string, unknown>;
+      const setNo = Number(rec.set_no);
+      if (Number.isFinite(setNo) && setNo >= 1) {
+        bySetNo.set(setNo, rec);
+      }
+    }
+  }
+
+  return PLAYER_CATEGORIES.map((cat) => {
+    const raw = bySetNo.get(cat.setNo);
+    const total = Math.max(0, Number(raw?.total ?? 0));
+    const remaining = Math.max(0, Number(raw?.remaining ?? 0));
+    const done = Math.max(0, Number(raw?.done ?? 0));
+    return {
+      setNo: cat.setNo,
+      label: cat.label,
+      total,
+      remaining,
+      done,
+    };
+  });
+}
+
+/**
+ * Computes whether the pre-bid Player Reveal Preview is currently running
+ * using server-synced clock offset.
+ */
+export function getReveal(
+  state: Pick<DbAuctionState, 'phase' | 'bidding_opens_at'> | null,
+  room: Pick<DbRoom, 'preview_seconds'> | null,
+  serverOffsetMs: number,
+): RevealState {
+  if (!state || state.phase !== 'bidding' || !state.bidding_opens_at) {
+    return { active: false, elapsedMs: 0, remainingMs: 0, durationMs: 0 };
+  }
+
+  const opensAtMs = Date.parse(state.bidding_opens_at);
+  if (Number.isNaN(opensAtMs)) {
+    return { active: false, elapsedMs: 0, remainingMs: 0, durationMs: 0 };
+  }
+
+  const serverNowMs = Date.now() + serverOffsetMs;
+  const rem = opensAtMs - serverNowMs;
+  if (rem <= 0) {
+    return { active: false, elapsedMs: 0, remainingMs: 0, durationMs: 0 };
+  }
+
+  const previewSec = room?.preview_seconds ?? 5;
+  const baseDurationMs = (previewSec > 0 ? previewSec : 5) * 1000;
+  const durationMs = Math.max(rem, baseDurationMs);
+  const elapsedMs = Math.max(0, durationMs - rem);
+
+  return {
+    active: true,
+    elapsedMs,
+    remainingMs: rem,
+    durationMs,
+  };
+}
 
 /**
  * Computes the next legal bid amount in lakhs:

@@ -10,6 +10,7 @@ import {
   RotateCcw,
   ShieldAlert,
   SkipForward,
+  Tv,
   Unlock,
   Undo2,
   XCircle,
@@ -20,6 +21,8 @@ import { Countdown } from '../../components/auction/Countdown';
 import { PlayerCard } from '../../components/auction/PlayerCard';
 import { ConfirmModal } from '../../components/host/ConfirmModal';
 import { FullResetModal } from '../../components/host/FullResetModal';
+import { PreviewLengthControl } from '../../components/host/PreviewLengthControl';
+import { ProjectorControlCard } from '../../components/host/ProjectorControlCard';
 import { TeamCrest } from '../../components/host/TeamCrest';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -78,10 +81,12 @@ export default function HostAuction() {
     soldLog,
     roomPlayers,
     offsetMs,
+    reveal,
+    previewSeconds,
     loading,
     error,
     refetch,
-  } = useAuction(roomId);
+  } = useAuction(roomId, { role: 'host' });
 
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all');
@@ -259,12 +264,18 @@ export default function HostAuction() {
       fallbackRefetchTimerRef.current = null;
     }
 
-    if (!roomId || !state || state.phase !== 'bidding' || !state.timer_ends_at) {
+    if (
+      !roomId ||
+      !state ||
+      state.phase !== 'bidding' ||
+      !state.timer_ends_at ||
+      reveal.active
+    ) {
       return;
     }
 
     const triggerResolveIfExpired = () => {
-      if (!supabase) return;
+      if (!supabase || reveal.active) return;
       const ms = remainingMs(state, offsetMs);
       if (ms === null || ms > 0) return;
 
@@ -300,7 +311,7 @@ export default function HostAuction() {
         fallbackRefetchTimerRef.current = null;
       }
     };
-  }, [roomId, state, offsetMs, refetch, showToast]);
+  }, [roomId, state, offsetMs, reveal.active, refetch, showToast]);
 
   const phase = state?.phase ?? 'idle';
   const lotInProgress = phase === 'bidding' || phase === 'paused';
@@ -319,6 +330,7 @@ export default function HostAuction() {
   const canVoidLastBid = lotInProgress && lotBids.length > 0 && !isBusy;
   const canPauseResume = lotInProgress && !isBusy;
   const canResetTimer = lotInProgress && !isBusy;
+  const canSkipReveal = reveal.active && !isBusy;
 
   const handleStartNextLot = useCallback(() => {
     if (!room || !canStartNext) return;
@@ -379,6 +391,16 @@ export default function HostAuction() {
     if (!room || !canResetTimer) return;
     void runRpc('reset-timer', 'host_reset_timer', { p_room: room.id });
   }, [room, canResetTimer, runRpc]);
+
+  const handleSkipReveal = useCallback(() => {
+    if (!room || !canSkipReveal) return;
+    void runRpc(
+      'skip-reveal',
+      'host_skip_reveal',
+      { p_room: room.id },
+      'Reveal skipped — bidding open',
+    );
+  }, [room, canSkipReveal, runRpc]);
 
   const handleVoidLastBid = useCallback(() => {
     if (!room || !canVoidLastBid) return;
@@ -580,6 +602,32 @@ export default function HostAuction() {
               {!room.auction_open && (
                 <Tag accent="gold">ROOM LOCKED</Tag>
               )}
+
+              {reveal.active && (
+                <Badge tone="gold">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#F5B921] animate-pulse" />
+                  <span>
+                    REVEAL RUNNING{' '}
+                    {Math.max(1, Math.ceil(reveal.remainingMs / 1000))}S
+                  </span>
+                </Badge>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canSkipReveal}
+                onClick={handleSkipReveal}
+                title={
+                  reveal.active
+                    ? 'Skip player reveal and open bidding immediately'
+                    : 'Available while a player reveal is running'
+                }
+                className="border-[#22D3EE]/45 text-[#22D3EE] hover:border-[#22D3EE] hover:bg-[#22D3EE]/10"
+              >
+                <SkipForward className="h-3.5 w-3.5" />
+                <span>Skip reveal</span>
+              </Button>
             </div>
 
             {phase === 'idle' || !lot || !player ? (
@@ -685,6 +733,7 @@ export default function HostAuction() {
               totalSeconds={room.bid_timer_seconds}
               offsetMs={offsetMs}
               size="md"
+              revealActive={reveal.active}
             />
           </div>
         </div>
@@ -879,6 +928,16 @@ export default function HostAuction() {
                 </span>
                 <KeyCap>R</KeyCap>
               </Button>
+            </div>
+
+            <div className="border-t border-white/[0.06] pt-2.5">
+              <PreviewLengthControl
+                roomId={room.id}
+                currentSeconds={previewSeconds}
+                disabled={isBusy}
+                compact
+                onUpdated={refetch}
+              />
             </div>
           </div>
 
@@ -1215,6 +1274,27 @@ export default function HostAuction() {
               </div>
             </Card>
           </div>
+
+          {/* Projector Mode Switch Card */}
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-white/[0.08] pb-2">
+              <div className="flex items-center gap-2">
+                <Tv className="h-4 w-4 text-[#22D3EE]" aria-hidden="true" />
+                <h2 className="font-display text-lg tracking-wide text-[#E8ECF4]">
+                  PROJECTOR
+                </h2>
+              </div>
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#22D3EE]">
+                {(room.projector_mode ?? 'auction').toUpperCase()}
+              </span>
+            </div>
+            <ProjectorControlCard
+              roomId={room.id}
+              currentMode={room.projector_mode ?? 'auction'}
+              compact
+              onModeChanged={refetch}
+            />
+          </Card>
         </div>
       </div>
 

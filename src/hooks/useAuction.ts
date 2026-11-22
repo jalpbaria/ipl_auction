@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  getReveal,
+  normalizeSetProgress,
+  normalizeSetsOverview,
+  type RevealState,
+  type SetOverviewItem,
+  type SetProgress,
+} from '../lib/auction';
 import { supabase } from '../lib/supabase';
 import type {
   DbAuctionState,
@@ -13,6 +21,11 @@ import type {
 } from '../types/database';
 
 export type AuctionConnectionStatus = 'connecting' | 'live' | 'reconnecting';
+export type AuctionRole = 'host' | 'team';
+
+export interface UseAuctionOptions {
+  role?: AuctionRole;
+}
 
 interface RawRoomPlayerRow {
   id: string;
@@ -56,10 +69,10 @@ const ROOM_PLAYER_SELECT =
   'id, base_price_lakhs, set_no, sort_order, status, sold_to_team_id, sold_price_lakhs, sold_at, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)';
 
 const ROOM_SELECT =
-  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, bid_timer_seconds, auction_open, status, created_at';
+  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, bid_timer_seconds, preview_seconds, auction_open, projector_mode, leaderboard_public, status, created_at';
 
 const AUCTION_STATE_SELECT =
-  'room_id, current_room_player_id, phase, current_bid_lakhs, current_bid_team_id, timer_ends_at, bid_seq, current_set_no, paused_remaining_ms, updated_at';
+  'room_id, current_room_player_id, phase, current_bid_lakhs, current_bid_team_id, timer_ends_at, bidding_opens_at, bid_seq, current_set_no, paused_remaining_ms, updated_at';
 
 export interface UseAuctionResult {
   room: DbRoom | null;
@@ -75,12 +88,24 @@ export interface UseAuctionResult {
   latestNotice: DbNotice | null;
   connectionStatus: AuctionConnectionStatus;
   offsetMs: number;
+  reveal: RevealState;
+  previewSeconds: number;
+  setProgress: SetProgress | null;
+  setsOverview: SetOverviewItem[];
+  setsLoading: boolean;
+  setsError: string | null;
+  refetchSets: () => Promise<void>;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
 }
 
-export function useAuction(roomId: string | undefined): UseAuctionResult {
+export function useAuction(
+  roomId: string | undefined,
+  options?: UseAuctionOptions,
+): UseAuctionResult {
+  const role: AuctionRole = options?.role ?? 'team';
+
   const [room, setRoom] = useState<DbRoom | null>(null);
   const [state, setState] = useState<DbAuctionState | null>(null);
   const [teams, setTeams] = useState<DbTeam[]>([]);
@@ -91,12 +116,19 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
   const [connectionStatus, setConnectionStatus] =
     useState<AuctionConnectionStatus>('connecting');
   const [offsetMs, setOffsetMs] = useState<number>(0);
+  const [revealTick, setRevealTick] = useState<number>(0);
+  const [setProgress, setSetProgress] = useState<SetProgress | null>(null);
+  const [setsOverview, setSetsOverview] = useState<SetOverviewItem[]>([]);
+  const [setsLoading, setSetsLoading] = useState<boolean>(true);
+  const [setsError, setSetsError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   const mountedRef = useRef<boolean>(true);
   const requestSeqRef = useRef<number>(0);
+  const setsSeqRef = useRef<number>(0);
   const currentLotIdRef = useRef<string | null>(null);
+  const currentSetNoRef = useRef<number | null>(null);
   const initialFetchCompletedRef = useRef<boolean>(false);
   const lastFocusRefetchRef = useRef<number>(0);
 
@@ -157,6 +189,54 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
     }
   }, [roomId]);
 
+  const fetchSetStats = useCallback(
+    async (silent = true) => {
+      if (!supabase || !roomId) return;
+      const seq = ++setsSeqRef.current;
+      if (!silent && mountedRef.current) {
+        setSetsLoading(true);
+      }
+
+      try {
+        const [progressRes, overviewRes] = await Promise.all([
+          supabase.rpc('get_set_progress', { p_room: roomId }),
+          supabase.rpc('get_sets_overview', { p_room: roomId }),
+        ]);
+
+        if (!mountedRef.current || seq !== setsSeqRef.current) return;
+
+        if (progressRes.error) {
+          setSetsError(progressRes.error.message);
+          return;
+        }
+        if (overviewRes.error) {
+          setSetsError(overviewRes.error.message);
+          return;
+        }
+
+        const nextProgress = normalizeSetProgress(
+          progressRes.data,
+          currentSetNoRef.current,
+        );
+        const nextOverview = normalizeSetsOverview(overviewRes.data);
+
+        setSetProgress(nextProgress);
+        setSetsOverview(nextOverview);
+        setSetsError(null);
+      } catch (err) {
+        if (!mountedRef.current || seq !== setsSeqRef.current) return;
+        setSetsError(
+          err instanceof Error ? err.message : 'Unable to load set progress.',
+        );
+      } finally {
+        if (mountedRef.current && seq === setsSeqRef.current) {
+          setSetsLoading(false);
+        }
+      }
+    },
+    [roomId],
+  );
+
   const fetchAuctionStateOnly = useCallback(async () => {
     if (!supabase || !roomId) return;
     const { data, error: stateErr } = await supabase
@@ -169,15 +249,21 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
 
     const nextState = (data as DbAuctionState | null) ?? null;
     const nextLotId = nextState?.current_room_player_id ?? null;
+    const nextSetNo = nextState?.current_set_no ?? null;
     const lotChanged = nextLotId !== currentLotIdRef.current;
+    const setChanged = nextSetNo !== currentSetNoRef.current;
 
     currentLotIdRef.current = nextLotId;
+    currentSetNoRef.current = nextSetNo;
     setState(nextState);
 
     if (lotChanged) {
       await fetchBidsForLot(nextLotId);
     }
-  }, [roomId, fetchBidsForLot]);
+    if (setChanged || lotChanged) {
+      await fetchSetStats(true);
+    }
+  }, [roomId, fetchBidsForLot, fetchSetStats]);
 
   const fetchTeamsOnly = useCallback(async () => {
     if (!supabase || !roomId) return;
@@ -208,12 +294,19 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
 
   const fetchRoomPlayersOnly = useCallback(async () => {
     if (!supabase || !roomId) return;
-    const { data, error: playersErr } = await supabase
+    let query = supabase
       .from('room_players')
       .select(ROOM_PLAYER_SELECT)
-      .eq('room_id', roomId)
+      .eq('room_id', roomId);
+
+    if (role === 'team') {
+      query = query.in('status', ['live', 'sold', 'unsold']);
+    }
+
+    const { data, error: playersErr } = await query
       .order('sort_order', { ascending: true })
       .range(0, 999);
+
     if (!mountedRef.current) return;
     if (!playersErr && data) {
       const normalized = sortRoomPlayers(
@@ -221,7 +314,7 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
       );
       setRoomPlayers(normalized);
     }
-  }, [roomId]);
+  }, [roomId, role]);
 
   const fetchNoticesOnly = useCallback(async () => {
     if (!supabase || !roomId) return;
@@ -262,41 +355,55 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
       }
 
       try {
-        const [roomRes, stateRes, teamsRes, financeRes, playersRes, noticesRes] =
-          await Promise.all([
-            supabase
-              .from('rooms')
-              .select(ROOM_SELECT)
-              .eq('id', roomId)
-              .maybeSingle(),
-            supabase
-              .from('auction_state')
-              .select(AUCTION_STATE_SELECT)
-              .eq('room_id', roomId)
-              .maybeSingle(),
-            supabase
-              .from('teams')
-              .select(
-                'id, room_id, short_code, name, leader_id, leader_name, status, joined_at',
-              )
-              .eq('room_id', roomId)
-              .order('short_code', { ascending: true }),
-            supabase
-              .from('team_finance')
-              .select('team_id, room_id, purse_left_lakhs, spent_lakhs')
-              .eq('room_id', roomId),
-            supabase
-              .from('room_players')
-              .select(ROOM_PLAYER_SELECT)
-              .eq('room_id', roomId)
-              .order('sort_order', { ascending: true })
-              .range(0, 999),
-            supabase
-              .from('notices')
-              .select('id, room_id, message, opens_at, created_at')
-              .eq('room_id', roomId)
-              .order('created_at', { ascending: false }),
-          ]);
+        let playersQuery = supabase
+          .from('room_players')
+          .select(ROOM_PLAYER_SELECT)
+          .eq('room_id', roomId);
+
+        if (role === 'team') {
+          playersQuery = playersQuery.in('status', ['live', 'sold', 'unsold']);
+        }
+
+        const [
+          roomRes,
+          stateRes,
+          teamsRes,
+          financeRes,
+          playersRes,
+          noticesRes,
+          setProgressRes,
+          setsOverviewRes,
+        ] = await Promise.all([
+          supabase
+            .from('rooms')
+            .select(ROOM_SELECT)
+            .eq('id', roomId)
+            .maybeSingle(),
+          supabase
+            .from('auction_state')
+            .select(AUCTION_STATE_SELECT)
+            .eq('room_id', roomId)
+            .maybeSingle(),
+          supabase
+            .from('teams')
+            .select(
+              'id, room_id, short_code, name, leader_id, leader_name, status, joined_at',
+            )
+            .eq('room_id', roomId)
+            .order('short_code', { ascending: true }),
+          supabase
+            .from('team_finance')
+            .select('team_id, room_id, purse_left_lakhs, spent_lakhs')
+            .eq('room_id', roomId),
+          playersQuery.order('sort_order', { ascending: true }).range(0, 999),
+          supabase
+            .from('notices')
+            .select('id, room_id, message, opens_at, created_at')
+            .eq('room_id', roomId)
+            .order('created_at', { ascending: false }),
+          supabase.rpc('get_set_progress', { p_room: roomId }),
+          supabase.rpc('get_sets_overview', { p_room: roomId }),
+        ]);
 
         if (!mountedRef.current || seq !== requestSeqRef.current) return;
 
@@ -310,6 +417,7 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
         const nextState = (stateRes.data as DbAuctionState | null) ?? null;
         const nextLotId = nextState?.current_room_player_id ?? null;
         currentLotIdRef.current = nextLotId;
+        currentSetNoRef.current = nextState?.current_set_no ?? null;
 
         let nextBids: DbBid[] = [];
         if (nextLotId) {
@@ -343,6 +451,23 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
         if (!noticesRes.error && noticesRes.data) {
           setNotices(noticesRes.data as DbNotice[]);
         }
+
+        if (setProgressRes.error) {
+          setSetsError(setProgressRes.error.message);
+        } else if (setsOverviewRes.error) {
+          setSetsError(setsOverviewRes.error.message);
+        } else {
+          setSetProgress(
+            normalizeSetProgress(
+              setProgressRes.data,
+              nextState?.current_set_no,
+            ),
+          );
+          setSetsOverview(normalizeSetsOverview(setsOverviewRes.data));
+          setSetsError(null);
+        }
+        setSetsLoading(false);
+
         setError(null);
         initialFetchCompletedRef.current = true;
       } catch (err) {
@@ -360,8 +485,12 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
         }
       }
     },
-    [roomId],
+    [roomId, role],
   );
+
+  const refetchSets = useCallback(async () => {
+    await fetchSetStats(false);
+  }, [fetchSetStats]);
 
   const refetch = useCallback(async () => {
     await Promise.all([fetchAll(true), syncServerClock()]);
@@ -371,9 +500,11 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
     mountedRef.current = true;
     initialFetchCompletedRef.current = false;
     currentLotIdRef.current = null;
+    currentSetNoRef.current = null;
 
     if (!roomId) {
       setLoading(false);
+      setSetsLoading(false);
       setError('Missing room identifier.');
       return;
     }
@@ -385,7 +516,7 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
     const client = supabase;
 
     const channel = client
-      .channel(`auction-room-${roomId}`)
+      .channel(`auction-room-${role}-${roomId}`)
       .on(
         'postgres_changes',
         {
@@ -420,6 +551,7 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
         },
         () => {
           void fetchRoomPlayersOnly();
+          void fetchSetStats(true);
         },
       )
       .on(
@@ -515,12 +647,14 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
     };
   }, [
     roomId,
+    role,
     fetchAll,
     syncServerClock,
     refetch,
     fetchAuctionStateOnly,
     fetchBidsForLot,
     fetchRoomPlayersOnly,
+    fetchSetStats,
     fetchFinanceOnly,
     fetchTeamsOnly,
     fetchRoomOnly,
@@ -532,6 +666,44 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
     if (!lotId) return null;
     return roomPlayers.find((rp) => rp.id === lotId) ?? null;
   }, [roomPlayers, state?.current_room_player_id]);
+
+  // Refetch set progress & 8-set overview whenever current_set_no changes
+  useEffect(() => {
+    if (!roomId || state?.current_set_no === undefined) return;
+    void fetchSetStats(true);
+  }, [roomId, state?.current_set_no, fetchSetStats]);
+
+  // Conditional 100ms ticker ONLY while a pre-bid player reveal is running
+  useEffect(() => {
+    if (!state || state.phase !== 'bidding' || !state.bidding_opens_at) {
+      return;
+    }
+
+    const opensAtMs = Date.parse(state.bidding_opens_at);
+    if (Number.isNaN(opensAtMs)) return;
+
+    if (Date.now() + offsetMs >= opensAtMs) {
+      return;
+    }
+
+    const id = window.setInterval(() => {
+      setRevealTick((t) => t + 1);
+      if (Date.now() + offsetMs >= opensAtMs) {
+        window.clearInterval(id);
+      }
+    }, 100);
+
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [state?.phase, state?.bidding_opens_at, offsetMs]);
+
+  const reveal = useMemo(() => {
+    void revealTick;
+    return getReveal(state, room, offsetMs);
+  }, [state, room, offsetMs, revealTick]);
+
+  const previewSeconds = room?.preview_seconds ?? 5;
 
   const lotBids = useMemo(() => {
     const lotId = state?.current_room_player_id;
@@ -556,11 +728,12 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
   }, [roomPlayers]);
 
   const queue = useMemo(() => {
+    if (role !== 'host') return [];
     const setNo = state?.current_set_no ?? 1;
     return roomPlayers
       .filter((rp) => rp.set_no === setNo && rp.status === 'pending')
       .slice(0, 6);
-  }, [roomPlayers, state?.current_set_no]);
+  }, [role, roomPlayers, state?.current_set_no]);
 
   const latestNotice = useMemo(() => notices[0] ?? null, [notices]);
 
@@ -578,6 +751,13 @@ export function useAuction(roomId: string | undefined): UseAuctionResult {
     latestNotice,
     connectionStatus,
     offsetMs,
+    reveal,
+    previewSeconds,
+    setProgress,
+    setsOverview,
+    setsLoading,
+    setsError,
+    refetchSets,
     loading,
     error,
     refetch,

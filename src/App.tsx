@@ -14,18 +14,24 @@ import HostLayout from './layouts/HostLayout';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import PlayRoom from './pages/PlayRoom';
+import ProjectorRoom from './pages/ProjectorRoom';
 import Rooms from './pages/Rooms';
 import TeamAuction from './pages/TeamAuction';
+import HostAnalysis from './pages/host/HostAnalysis';
 import HostAuction from './pages/host/HostAuction';
+import HostLeaderboard from './pages/host/HostLeaderboard';
 import HostNotices from './pages/host/HostNotices';
 import HostOverview from './pages/host/HostOverview';
 import HostPlayers from './pages/host/HostPlayers';
+import HostProjector from './pages/host/HostProjector';
 import HostPurseControl from './pages/host/HostPurseControl';
 import HostRejoinRequests from './pages/host/HostRejoinRequests';
 import HostReports from './pages/host/HostReports';
 import HostSettings from './pages/host/HostSettings';
 import HostTeamCodes from './pages/host/HostTeamCodes';
 import PlayLayout from './pages/play/PlayLayout';
+import TeamLeaderboard from './pages/play/TeamLeaderboard';
+import TeamPlayingXi from './pages/play/TeamPlayingXi';
 import { useAuthStore } from './store/auth';
 
 const TOUCH_SESSION_INTERVAL_MS = 45_000;
@@ -103,8 +109,19 @@ export default function App() {
             <Route path="notices" element={<HostNotices />} />
             <Route path="purse" element={<HostPurseControl />} />
             <Route path="reports" element={<HostReports />} />
+            <Route path="analysis" element={<HostAnalysis />} />
+            <Route path="leaderboard" element={<HostLeaderboard />} />
+            <Route path="projector" element={<HostProjector />} />
             <Route path="settings" element={<HostSettings />} />
           </Route>
+          <Route
+            path="/projector/:roomId"
+            element={
+              <ProtectedRoute>
+                <ProjectorRoom />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/play/:roomId"
             element={
@@ -115,6 +132,8 @@ export default function App() {
           >
             <Route index element={<PlayRoom />} />
             <Route path="auction" element={<TeamAuction />} />
+            <Route path="xi" element={<TeamPlayingXi />} />
+            <Route path="leaderboard" element={<TeamLeaderboard />} />
           </Route>
           <Route path="/host" element={<Navigate to="/rooms" replace />} />
           <Route path="/play" element={<Navigate to="/rooms" replace />} />

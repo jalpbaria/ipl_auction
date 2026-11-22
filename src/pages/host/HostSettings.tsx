@@ -2,6 +2,7 @@ import { AlertTriangle, KeyRound, Loader2, Save, Shield, User } from 'lucide-rea
 import React, { useEffect, useState } from 'react';
 import { EnforcementControl } from '../../components/host/EnforcementControl';
 import { FullResetModal } from '../../components/host/FullResetModal';
+import { PreviewLengthControl } from '../../components/host/PreviewLengthControl';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
@@ -342,6 +343,19 @@ export default function HostSettings() {
             </Button>
           </div>
         </form>
+
+        <div className="mt-6 border-t border-white/[0.08] pt-5">
+          <div className="max-w-md space-y-2">
+            <PreviewLengthControl
+              roomId={room.id}
+              currentSeconds={room.preview_seconds ?? 5}
+              onUpdated={refreshRoom}
+            />
+            <p className="text-[11px] text-[#8B95AA]">
+              Controls how long the pre-bid Player Reveal Preview plays on the projector and team screens before live bidding opens. Choose OFF to start bidding immediately.
+            </p>
+          </div>
+        </div>
       </Card>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

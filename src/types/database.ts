@@ -1,5 +1,7 @@
 import type { PlayerCategory, PlayerSkill } from '../data/categories';
 
+export type ProjectorMode = 'auction' | 'squads' | 'leaderboard';
+
 export interface DbRoom {
   id: string;
   host_id: string;
@@ -9,8 +11,13 @@ export interface DbRoom {
   squad_min: number;
   overseas_max: number;
   bid_timer_seconds: number;
+  preview_seconds?: number;
   auction_open: boolean;
   anticheat_enabled?: boolean;
+  projector_mode?: ProjectorMode;
+  leaderboard_public?: boolean;
+  xi_overseas_max?: number;
+  xi_locked?: boolean;
   status: string;
   created_at: string;
 }
@@ -114,6 +121,7 @@ export interface DbAuctionState {
   current_bid_lakhs: number;
   current_bid_team_id: string | null;
   timer_ends_at: string | null;
+  bidding_opens_at: string | null;
   bid_seq: number;
   current_set_no: number;
   paused_remaining_ms: number | null;
@@ -216,4 +224,28 @@ export interface ReportViolationResult {
 export interface RejoinWithCodeResult {
   team_id: string;
   room_id: string;
+}
+
+export interface LeaderboardRow {
+  pos: number;
+  team_id: string;
+  short_code: string;
+  team_name: string;
+  score: number;
+  squad: number;
+}
+
+export interface DbPlayingXi {
+  team_id: string;
+  room_id: string;
+  room_player_ids: string[];
+  captain_room_player_id: string | null;
+  updated_at: string;
+}
+
+export interface RpcSetProgressRow {
+  set_no: number;
+  total: number;
+  remaining: number;
+  done: number;
 }

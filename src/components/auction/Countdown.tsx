@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { remainingMs } from '../../lib/auction';
+import { getReveal, remainingMs } from '../../lib/auction';
 import type { DbAuctionState } from '../../types/database';
 
 export interface CountdownProps {
   state: DbAuctionState | null;
   totalSeconds?: number;
   offsetMs: number;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
+  revealActive?: boolean;
 }
 
 const SIZE_MAP = {
@@ -25,6 +26,11 @@ const SIZE_MAP = {
     value: 'text-5xl',
     sub: 'text-[11px]',
   },
+  xl: {
+    box: 'h-56 w-56',
+    value: 'text-[88px]',
+    sub: 'text-sm',
+  },
 } as const;
 
 export function Countdown({
@@ -32,10 +38,12 @@ export function Countdown({
   totalSeconds = 20,
   offsetMs,
   size = 'md',
+  revealActive,
 }: CountdownProps) {
   const [msLeft, setMsLeft] = useState<number | null>(() =>
     remainingMs(state, offsetMs),
   );
+  const [, setRevealTick] = useState(0);
 
   useEffect(() => {
     setMsLeft(remainingMs(state, offsetMs));
@@ -46,65 +54,95 @@ export function Countdown({
 
     const intervalId = window.setInterval(() => {
       setMsLeft(remainingMs(state, offsetMs));
+      if (revealActive === undefined) {
+        setRevealTick((t) => t + 1);
+      }
     }, 100);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [state, offsetMs]);
+  }, [state, offsetMs, revealActive]);
+
+  const isRevealActive =
+    revealActive !== undefined
+      ? revealActive
+      : getReveal(state, null, offsetMs).active;
 
   const isPaused = state?.phase === 'paused';
-  const isBidding = state?.phase === 'bidding' && msLeft !== null;
   const totalMs = Math.max(1000, totalSeconds * 1000);
+  const clampedMsLeft =
+    msLeft !== null ? Math.min(totalMs, Math.max(0, msLeft)) : null;
 
-  const secondsDisplay =
-    msLeft !== null ? Math.max(0, Math.ceil(msLeft / 1000)) : null;
+  const isBidding =
+    state?.phase === 'bidding' && !isRevealActive && clampedMsLeft !== null;
 
-  const isUrgent = isBidding && msLeft !== null && msLeft < 5000;
+  const secondsDisplay = isRevealActive
+    ? totalSeconds
+    : clampedMsLeft !== null
+      ? Math.max(0, Math.ceil(clampedMsLeft / 1000))
+      : null;
 
-  const progress =
-    msLeft !== null ? Math.min(1, Math.max(0, msLeft / totalMs)) : 0;
+  const isUrgent = isBidding && clampedMsLeft !== null && clampedMsLeft < 5000;
+
+  const progress = isRevealActive
+    ? 1
+    : clampedMsLeft !== null
+      ? Math.min(1, Math.max(0, clampedMsLeft / totalMs))
+      : 0;
 
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference * (1 - progress);
+  const dashOffset = isRevealActive
+    ? 0
+    : clampedMsLeft !== null
+      ? circumference * (1 - progress)
+      : circumference;
 
-  const strokeColor = isPaused
-    ? '#F5B921'
-    : isUrgent
-      ? '#EF4444'
-      : isBidding
-        ? '#22D3EE'
-        : 'rgba(255,255,255,0.16)';
+  const strokeColor = isRevealActive
+    ? 'rgba(255,255,255,0.14)'
+    : isPaused
+      ? '#F5B921'
+      : isUrgent
+        ? '#EF4444'
+        : isBidding
+          ? '#22D3EE'
+          : 'rgba(255,255,255,0.16)';
 
-  const textColorClass = isPaused
-    ? 'text-[#F5B921]'
-    : isUrgent
-      ? 'text-red-400'
-      : isBidding
-        ? 'text-[#E8ECF4]'
-        : 'text-[#8B95AA]';
+  const textColorClass = isRevealActive
+    ? 'text-[#8B95AA]/70'
+    : isPaused
+      ? 'text-[#F5B921]'
+      : isUrgent
+        ? 'text-red-400'
+        : isBidding
+          ? 'text-[#E8ECF4]'
+          : 'text-[#8B95AA]';
 
-  const subLabel = isPaused
-    ? 'PAUSED'
-    : isUrgent
-      ? 'GOING'
-      : isBidding
-        ? 'SECONDS'
-        : 'CLOCK';
+  const subLabel = isRevealActive
+    ? 'GET READY'
+    : isPaused
+      ? 'PAUSED'
+      : isUrgent
+        ? 'GOING'
+        : isBidding
+          ? 'SECONDS'
+          : 'CLOCK';
 
   const sizing = SIZE_MAP[size];
 
   return (
     <div
       className={`relative inline-flex shrink-0 items-center justify-center rounded-[4px] border bg-[#070B14] p-2 ${
-        isUrgent
-          ? 'border-red-500/60'
-          : isPaused
-            ? 'border-[#F5B921]/45'
-            : isBidding
-              ? 'border-[#22D3EE]/35'
-              : 'border-white/[0.08]'
+        isRevealActive
+          ? 'border-white/[0.12]'
+          : isUrgent
+            ? 'border-red-500/60'
+            : isPaused
+              ? 'border-[#F5B921]/45'
+              : isBidding
+                ? 'border-[#22D3EE]/35'
+                : 'border-white/[0.08]'
       }`}
       aria-live="off"
     >
@@ -130,7 +168,7 @@ export function Countdown({
             stroke={strokeColor}
             strokeWidth="7"
             strokeDasharray={circumference}
-            strokeDashoffset={msLeft !== null ? dashOffset : circumference}
+            strokeDashoffset={dashOffset}
             strokeLinecap="butt"
             className="transition-[stroke-dashoffset,stroke] duration-100 ease-linear motion-reduce:transition-none"
           />
@@ -144,11 +182,13 @@ export function Countdown({
           </span>
           <span
             className={`mt-0.5 font-mono uppercase tracking-[0.12em] ${sizing.sub} ${
-              isPaused
-                ? 'text-[#F5B921]'
-                : isUrgent
-                  ? 'text-red-400'
-                  : 'text-[#8B95AA]'
+              isRevealActive
+                ? 'text-[#F5B921]/75'
+                : isPaused
+                  ? 'text-[#F5B921]'
+                  : isUrgent
+                    ? 'text-red-400'
+                    : 'text-[#8B95AA]'
             }`}
           >
             {subLabel}

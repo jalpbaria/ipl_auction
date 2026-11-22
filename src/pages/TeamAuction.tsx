@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   ChevronUp,
   Clock,
@@ -9,12 +10,15 @@ import {
   RefreshCw,
   Trophy,
   Users,
+  Volume2,
+  VolumeX,
   XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Countdown } from '../components/auction/Countdown';
 import { PlayerCard } from '../components/auction/PlayerCard';
+import { PlayerReveal } from '../components/auction/PlayerReveal';
 import { getTeamPalette, TeamCrest } from '../components/host/TeamCrest';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -31,6 +35,7 @@ import {
   remainingMs,
 } from '../lib/auction';
 import { formatLakhs } from '../lib/format';
+import { playProjectorBidTick } from '../lib/sound';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/auth';
 import { useToastStore } from '../store/toast';
@@ -97,7 +102,7 @@ export default function TeamAuction() {
   const [teamCheckError, setTeamCheckError] = useState<string | null>(null);
   const [notActiveMember, setNotActiveMember] = useState(false);
 
-  // Realtime auction room data
+  // Realtime auction room data (team role: never fetches pending players)
   const {
     room,
     state,
@@ -106,20 +111,26 @@ export default function TeamAuction() {
     finance,
     lotBids,
     soldLog,
-    queue,
     roomPlayers,
     latestNotice,
     connectionStatus,
     offsetMs,
+    reveal,
+    setProgress,
+    setsOverview,
+    setsLoading,
+    setsError,
+    refetchSets,
     loading: auctionLoading,
     error: auctionError,
     refetch,
-  } = useAuction(roomId);
+  } = useAuction(roomId, { role: 'team' });
 
   // UI state
   const [rightTab, setRightTab] = useState<RightTab>('up-next');
   const [soldRankingMode, setSoldRankingMode] = useState(false);
   const [squadDrawerOpen, setSquadDrawerOpen] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(false);
 
   // Bid submission anti-double-click + state wait
   const [cooldownActive, setCooldownActive] = useState(false);
@@ -291,7 +302,8 @@ export default function TeamAuction() {
       !activeTeam ||
       !state ||
       state.phase !== 'bidding' ||
-      !state.timer_ends_at
+      !state.timer_ends_at ||
+      reveal.active
     ) {
       return;
     }
@@ -299,7 +311,7 @@ export default function TeamAuction() {
     const lotKey = `${state.current_room_player_id ?? 'none'}:${state.bid_seq}`;
 
     const checkExpired = () => {
-      if (!supabase) return;
+      if (!supabase || reveal.active) return;
       const ms = remainingMs(state, offsetMs);
       if (ms === null || ms > 0) return;
 
@@ -340,6 +352,7 @@ export default function TeamAuction() {
     activeTeam,
     state,
     offsetMs,
+    reveal.active,
     refetch,
   ]);
 
@@ -420,6 +433,10 @@ export default function TeamAuction() {
     if (phase === 'paused') return 'PAUSED';
     if (phase === 'sold' || phase === 'unsold') return 'LOT CLOSED';
     if (!lot) return 'WAITING FOR THE HOST';
+    if (reveal.active) {
+      const openSec = Math.max(1, Math.ceil(reveal.remainingMs / 1000));
+      return `BIDDING OPENS IN ${openSec}S`;
+    }
     if (iHoldHighestBid) return 'YOU HOLD THE HIGHEST BID';
     if (!myFinance || myFinance.purse_left_lakhs < nextAmount) {
       return 'NOT ENOUGH PURSE';
@@ -440,6 +457,8 @@ export default function TeamAuction() {
   }, [
     phase,
     lot,
+    reveal.active,
+    reveal.remainingMs,
     iHoldHighestBid,
     myFinance,
     nextAmount,
@@ -454,10 +473,11 @@ export default function TeamAuction() {
   const canRaise =
     Boolean(room?.auction_open) &&
     Boolean(activeTeam) &&
+    !reveal.active &&
     raiseDisableReason === null;
 
   const handleRaiseBid = useCallback(async () => {
-    if (!supabase || !room || !lot || !canRaise || !state) return;
+    if (!supabase || !room || !lot || !canRaise || !state || reveal.active) return;
 
     const amountToBid = nextBid(state, lot.base_price_lakhs);
     const seqAtSubmit = state.bid_seq;
@@ -521,13 +541,13 @@ export default function TeamAuction() {
       });
       await refetch();
     }
-  }, [room, lot, canRaise, state, refetch, showToast]);
+  }, [room, lot, canRaise, state, reveal.active, refetch, showToast]);
 
   // Keyboard accessibility: Space or Enter triggers RAISE when focused or page has focus with no input active
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (!room?.auction_open || !activeTeam) return;
+      if (!room?.auction_open || !activeTeam || reveal.active) return;
 
       const isRaiseTrigger = event.code === 'Space' || event.key === 'Enter';
       if (!isRaiseTrigger) return;
@@ -559,7 +579,7 @@ export default function TeamAuction() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [room?.auction_open, activeTeam, canRaise, handleRaiseBid]);
+  }, [room?.auction_open, activeTeam, reveal.active, canRaise, handleRaiseBid]);
 
   // Render guards
   const isInitialLoading = teamCheckLoading || (Boolean(verifiedTeam) && auctionLoading);
@@ -831,6 +851,31 @@ export default function TeamAuction() {
               </span>
             </div>
 
+            <button
+              type="button"
+              onClick={() => {
+                const next = !soundEnabled;
+                setSoundEnabled(next);
+                if (next) playProjectorBidTick();
+              }}
+              aria-label={soundEnabled ? 'Mute reveal audio' : 'Unmute reveal audio'}
+              title={soundEnabled ? 'Reveal audio on' : 'Reveal audio muted'}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-[4px] border px-2.5 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+                soundEnabled
+                  ? 'border-[#22D3EE] bg-[#22D3EE]/15 text-[#22D3EE]'
+                  : 'border-white/15 bg-[#070B14] text-[#8B95AA] hover:border-white/30 hover:text-[#E8ECF4]'
+              }`}
+            >
+              {soundEnabled ? (
+                <Volume2 className="h-3.5 w-3.5" />
+              ) : (
+                <VolumeX className="h-3.5 w-3.5" />
+              )}
+              <span className="hidden sm:inline">
+                {soundEnabled ? 'SFX' : 'MUTE'}
+              </span>
+            </button>
+
             <Link to={`/play/${roomId}`}>
               <Button variant="ghost" size="sm" className="border border-white/10">
                 <ArrowLeft className="h-3.5 w-3.5" />
@@ -849,6 +894,8 @@ export default function TeamAuction() {
             {/* 2. CURRENT LOT PANEL */}
             <div
               className={`relative overflow-hidden rounded-[4px] border bg-[#0E1524] p-5 transition-colors ${
+                reveal.active ? 'min-h-[510px]' : ''
+              } ${
                 iHoldHighestBid
                   ? 'border-[var(--team-primary)] bg-[color-mix(in_srgb,var(--team-primary)_10%,#0E1524)]'
                   : 'border-[var(--team-primary)]/45'
@@ -868,7 +915,7 @@ export default function TeamAuction() {
                       WAITING FOR THE HOST
                     </h1>
                     <p className="max-w-md text-sm text-[#8B95AA]">
-                      The auctioneer is preparing the next player on the block. Keep an eye on the Up Next queue.
+                      The auctioneer is preparing the next player on the block. Keep an eye on the Up Next set tracker.
                     </p>
                     <div className="pt-2">
                       <Countdown
@@ -1030,9 +1077,25 @@ export default function TeamAuction() {
                         totalSeconds={room.bid_timer_seconds}
                         offsetMs={offsetMs}
                         size="lg"
+                        revealActive={reveal.active}
                       />
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* PLAYER REVEAL OVERLAY (synced to bidding_opens_at) */}
+              {reveal.active && (
+                <div className="absolute inset-0 z-20 flex bg-[#070B14]">
+                  <PlayerReveal
+                    lot={lot}
+                    setProgress={setProgress}
+                    durationMs={reveal.durationMs}
+                    elapsedMs={reveal.elapsedMs}
+                    variant="team"
+                    teamColors={teamPalette}
+                    soundOn={soundEnabled}
+                  />
                 </div>
               )}
 
@@ -1123,17 +1186,28 @@ export default function TeamAuction() {
                 <span className="inline-flex items-center gap-3 font-display text-3xl sm:text-4xl tracking-wider">
                   <Gavel className="h-6 w-6 shrink-0" />
                   <span>
-                    {lot ? `RAISE TO ${formatLakhs(nextAmount)}` : 'RAISE BID'}
+                    {reveal.active
+                      ? 'PLAYER REVEAL'
+                      : lot
+                        ? `RAISE TO ${formatLakhs(nextAmount)}`
+                        : 'RAISE BID'}
                   </span>
                 </span>
 
                 <span className="hidden sm:inline-flex items-center gap-1.5 rounded-[2px] border border-current/30 bg-black/20 px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.1em]">
-                  SPACE / ENTER
+                  {reveal.active
+                    ? `OPENS IN ${Math.max(1, Math.ceil(reveal.remainingMs / 1000))}S`
+                    : 'SPACE / ENTER'}
                 </span>
               </button>
 
               <div className="flex items-center justify-between px-1">
-                {raiseDisableReason ? (
+                {reveal.active ? (
+                  <p className="font-mono text-xs font-semibold uppercase tracking-[0.1em] text-[#F5B921]">
+                    Bidding opens in{' '}
+                    {Math.max(1, Math.ceil(reveal.remainingMs / 1000))}s
+                  </p>
+                ) : raiseDisableReason ? (
                   <p className="font-mono text-xs font-semibold uppercase tracking-[0.1em] text-[#F5B921]">
                     {raiseDisableReason}
                   </p>
@@ -1256,57 +1330,269 @@ export default function TeamAuction() {
               </div>
 
               <div className="p-4">
-                {/* UP NEXT */}
-                {rightTab === 'up-next' && (
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#22D3EE]">
-                        SET {state?.current_set_no ?? 1} ·{' '}
-                        {currentSetInfo?.label ?? 'POOL'}
-                      </span>
-                      <span className="font-mono text-[10px] text-[#8B95AA] tabular-nums">
-                        NEXT {queue.length}
-                      </span>
-                    </div>
+                {/* UP NEXT (Set-level progress & 8-set timeline — never shows pending players) */}
+                {rightTab === 'up-next' &&
+                  (() => {
+                    if (
+                      setsLoading &&
+                      !setProgress &&
+                      setsOverview.length === 0
+                    ) {
+                      return (
+                        <div className="space-y-3" aria-busy="true">
+                          <div className="h-28 motion-safe:animate-pulse rounded-[4px] border border-white/[0.08] bg-[#070B14]" />
+                          <div className="h-8 motion-safe:animate-pulse rounded-[4px] border border-white/[0.08] bg-[#070B14]" />
+                          <div className="space-y-1.5">
+                            {Array.from({ length: 8 }, (_, idx) => (
+                              <div
+                                key={idx}
+                                className="h-7 motion-safe:animate-pulse rounded-[3px] border border-white/[0.06] bg-[#070B14]"
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
 
-                    {queue.length === 0 ? (
-                      <p className="py-6 text-center font-mono text-xs uppercase tracking-[0.08em] text-[#8B95AA]">
-                        No pending players left in this set
-                      </p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {queue.map((rp) => {
-                          const qp = rp.players;
-                          if (!qp) return null;
-                          return (
-                            <div
-                              key={rp.id}
-                              className="flex items-center justify-between gap-2 rounded-[3px] border border-white/[0.06] bg-[#070B14] px-3 py-2 text-xs"
-                            >
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-[10px] font-semibold text-[#22D3EE]">
-                                    {qp.player_code}
+                    if (setsError && !setProgress && setsOverview.length === 0) {
+                      return (
+                        <div className="rounded-[4px] border border-red-500/35 bg-[#070B14] p-4 text-center space-y-3">
+                          <p className="font-mono text-xs uppercase tracking-[0.08em] text-red-300">
+                            {setsError}
+                          </p>
+                          <Button
+                            variant="cyan"
+                            size="sm"
+                            onClick={() => void refetchSets()}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>Retry</span>
+                          </Button>
+                        </div>
+                      );
+                    }
+
+                    const activeSetNo =
+                      setProgress?.setNo ?? state?.current_set_no ?? 1;
+                    const activeCatInfo = getSetCategoryInfo(activeSetNo);
+                    const activeLabel =
+                      setProgress?.setLabel ??
+                      activeCatInfo?.label ??
+                      currentSetInfo?.label ??
+                      `Set ${activeSetNo}`;
+                    const currentTotal = setProgress?.total ?? 0;
+                    const currentRemaining = setProgress?.remaining ?? 0;
+                    const currentDone = setProgress?.done ?? 0;
+                    const currentPct =
+                      currentTotal > 0
+                        ? Math.min(
+                            100,
+                            Math.round((currentDone / currentTotal) * 100),
+                          )
+                        : 0;
+
+                    const allSetsDone =
+                      setsOverview.length > 0 &&
+                      setsOverview.every((s) => s.remaining === 0);
+                    const isAuctionComplete = allSetsDone && !lot;
+                    const currentSetComplete =
+                      currentTotal > 0 && currentRemaining === 0;
+
+                    const nextSet =
+                      setsOverview.find((s) => s.setNo === activeSetNo + 1) ??
+                      null;
+                    const nextIncompleteSet =
+                      setsOverview.find(
+                        (s) => s.setNo > activeSetNo && s.remaining > 0,
+                      ) ??
+                      nextSet ??
+                      null;
+
+                    const highlightedSetNo = isAuctionComplete
+                      ? -1
+                      : currentSetComplete && nextIncompleteSet
+                        ? nextIncompleteSet.setNo
+                        : activeSetNo;
+
+                    return (
+                      <div className="space-y-3.5">
+                        {/* Section Header */}
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#22D3EE]">
+                            UP NEXT
+                          </span>
+                          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#8B95AA] tabular-nums">
+                            {isAuctionComplete
+                              ? 'ALL 8 SETS COMPLETE'
+                              : `SET ${activeSetNo} OF 8`}
+                          </span>
+                        </div>
+
+                        {/* Large Current Set Card */}
+                        <div className="relative rounded-[4px] border border-[#22D3EE]/35 bg-[#070B14] p-4">
+                          <CornerBrackets tone="cyan" size="sm" />
+
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-[#22D3EE]">
+                              SET {activeSetNo}
+                            </span>
+                            {isAuctionComplete ? (
+                              <Badge tone="gold">AUCTION COMPLETE</Badge>
+                            ) : currentSetComplete ? (
+                              <Badge tone="gold">SET COMPLETE</Badge>
+                            ) : (
+                              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#8B95AA] tabular-nums">
+                                {currentDone}/{currentTotal} DONE
+                              </span>
+                            )}
+                          </div>
+
+                          <h3 className="mt-1.5 font-display text-4xl leading-none tracking-wide text-[#E8ECF4]">
+                            {isAuctionComplete
+                              ? 'AUCTION COMPLETE'
+                              : activeLabel.toUpperCase()}
+                          </h3>
+
+                          <p className="mt-2 font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#F5B921] tabular-nums">
+                            {isAuctionComplete
+                              ? '0 PLAYERS LEFT IN ROOM'
+                              : currentSetComplete
+                                ? 'SET COMPLETE · STANDING BY FOR NEXT SET'
+                                : `${currentRemaining} ${currentRemaining === 1 ? 'PLAYER' : 'PLAYERS'} LEFT IN THIS SET`}
+                          </p>
+
+                          <div className="mt-3 space-y-1">
+                            <div className="h-2 w-full overflow-hidden rounded-[2px] border border-white/[0.08] bg-[#0E1524]">
+                              <div
+                                style={{ width: `${currentPct}%` }}
+                                className="h-full bg-[#22D3EE] transition-all duration-300"
+                              />
+                            </div>
+                            <div className="flex items-center justify-between font-mono text-[10px] text-[#8B95AA] tabular-nums">
+                              <span>
+                                {currentDone} / {currentTotal} RESOLVED
+                              </span>
+                              <span>{currentPct}%</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* NEXT SET Line */}
+                        <div className="flex items-center justify-between gap-2 rounded-[3px] border border-white/[0.08] bg-[#070B14] px-3 py-2 font-mono text-[11px]">
+                          <span className="uppercase tracking-[0.1em] text-[#8B95AA]">
+                            NEXT SET
+                          </span>
+                          {isAuctionComplete ? (
+                            <span className="font-bold uppercase tracking-[0.08em] text-[#F5B921]">
+                              AUCTION COMPLETE
+                            </span>
+                          ) : activeSetNo >= 8 ? (
+                            <span className="font-bold uppercase tracking-[0.08em] text-[#F5B921]">
+                              FINAL SET
+                            </span>
+                          ) : nextSet ? (
+                            <span className="truncate font-semibold uppercase tracking-[0.06em] text-[#E8ECF4] tabular-nums">
+                              SET {nextSet.setNo} · {nextSet.label} (
+                              {nextSet.total})
+                            </span>
+                          ) : (
+                            <span className="uppercase text-[#8B95AA]">—</span>
+                          )}
+                        </div>
+
+                        {/* Compact Vertical 8-Set Timeline */}
+                        <div className="space-y-1.5">
+                          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#8B95AA]">
+                            8-SET TIMELINE
+                          </p>
+                          <div className="space-y-1">
+                            {setsOverview.map((s) => {
+                              const isCompleted =
+                                s.total > 0 && s.remaining === 0;
+                              const isHighlighted = s.setNo === highlightedSetNo;
+                              const pct =
+                                s.total > 0
+                                  ? Math.min(
+                                      100,
+                                      Math.round((s.done / s.total) * 100),
+                                    )
+                                  : 0;
+
+                              return (
+                                <div
+                                  key={s.setNo}
+                                  style={
+                                    isHighlighted
+                                      ? {
+                                          borderColor: 'var(--team-primary)',
+                                          backgroundColor:
+                                            'color-mix(in srgb, var(--team-primary) 14%, #070B14)',
+                                        }
+                                      : undefined
+                                  }
+                                  className={`flex items-center gap-2.5 rounded-[3px] border px-2.5 py-1.5 transition-colors ${
+                                    isHighlighted
+                                      ? 'text-[#E8ECF4]'
+                                      : isCompleted
+                                        ? 'border-white/[0.05] bg-[#070B14]/60 opacity-55'
+                                        : 'border-white/[0.06] bg-[#070B14]'
+                                  }`}
+                                >
+                                  <span
+                                    style={
+                                      isHighlighted
+                                        ? { color: 'var(--team-primary)' }
+                                        : undefined
+                                    }
+                                    className={`w-5 shrink-0 font-mono text-[10px] font-bold tabular-nums ${
+                                      isHighlighted
+                                        ? ''
+                                        : isCompleted
+                                          ? 'text-[#22D3EE]'
+                                          : 'text-[#8B95AA]'
+                                    }`}
+                                  >
+                                    {isCompleted ? (
+                                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                    ) : (
+                                      `S${s.setNo}`
+                                    )}
                                   </span>
-                                  <span className="truncate font-medium text-[#E8ECF4]">
-                                    {qp.first_name} {qp.last_name}
+
+                                  <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold uppercase tracking-[0.04em] text-[#E8ECF4]">
+                                    {s.label}
+                                  </span>
+
+                                  <div className="h-1.5 w-16 shrink-0 overflow-hidden rounded-[2px] bg-[#0E1524] border border-white/[0.06]">
+                                    <div
+                                      style={{
+                                        width: `${pct}%`,
+                                        backgroundColor: isHighlighted
+                                          ? 'var(--team-primary)'
+                                          : isCompleted
+                                            ? '#34D399'
+                                            : '#22D3EE',
+                                      }}
+                                      className="h-full transition-all duration-300"
+                                    />
+                                  </div>
+
+                                  <span className="w-11 shrink-0 text-right font-mono text-[10px] text-[#8B95AA] tabular-nums">
+                                    {s.done}/{s.total}
                                   </span>
                                 </div>
-                                <p className="mt-0.5 font-mono text-[10px] uppercase text-[#8B95AA]">
-                                  {qp.skill}
-                                  {qp.is_overseas ? ' · OVERSEAS' : ''}
-                                </p>
-                              </div>
-                              <span className="shrink-0 font-mono text-xs font-semibold text-[#F5B921] tabular-nums">
-                                {formatLakhs(rp.base_price_lakhs)}
-                              </span>
-                            </div>
-                          );
-                        })}
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Muted Helper Note */}
+                        <p className="border-t border-white/[0.06] pt-2.5 font-mono text-[10px] leading-relaxed text-[#8B95AA]">
+                          The host decides the order of players inside a set.
+                        </p>
                       </div>
-                    )}
-                  </div>
-                )}
+                    );
+                  })()}
 
                 {/* SOLD LOG / RANKINGS */}
                 {rightTab === 'sold-log' && (

@@ -97,6 +97,222 @@ body {
   }
 }
 
+/* Player Reveal Preview — compositor-only transform/opacity animations */
+@keyframes reveal-backdrop-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes reveal-spotlight-in {
+  0% {
+    opacity: 0;
+    transform: scaleY(0.75) translate3d(0, -18px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleY(1) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes reveal-slide-down {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -14px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes reveal-card-arrive {
+  0% {
+    opacity: 0;
+    transform: translate3d(-38px, 22px, 0) scale(0.86) rotateZ(-3.5deg);
+  }
+  70% {
+    opacity: 1;
+    transform: translate3d(3px, -2px, 0) scale(1.015) rotateZ(0.6deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1) rotateZ(0deg);
+  }
+}
+
+@keyframes reveal-card-flip-front {
+  0% {
+    transform: rotateY(180deg);
+  }
+  100% {
+    transform: rotateY(0deg);
+  }
+}
+
+@keyframes reveal-card-flip-back {
+  0% {
+    transform: rotateY(0deg);
+  }
+  100% {
+    transform: rotateY(-180deg);
+  }
+}
+
+@keyframes reveal-card-shine {
+  0% {
+    opacity: 0;
+    transform: translate3d(-140%, 0, 0) skewX(-22deg);
+  }
+  20% {
+    opacity: 0.72;
+  }
+  80% {
+    opacity: 0.52;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(260%, 0, 0) skewX(-22deg);
+  }
+}
+
+@keyframes reveal-card-bob {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -4px, 0);
+  }
+}
+
+@keyframes reveal-glow-burst {
+  0% {
+    opacity: 0;
+    transform: scale(0.68);
+  }
+  40% {
+    opacity: 0.9;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0.32;
+    transform: scale(1);
+  }
+}
+
+@keyframes reveal-fade-up {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes reveal-base-slam {
+  0% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  58% {
+    opacity: 1;
+    transform: scale(0.96);
+  }
+  82% {
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes reveal-micro-shake {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  22% {
+    transform: translate3d(-3px, 2px, 0);
+  }
+  48% {
+    transform: translate3d(3px, -2px, 0);
+  }
+  74% {
+    transform: translate3d(-2px, 1px, 0);
+  }
+}
+
+@keyframes reveal-ring-pulse {
+  0% {
+    opacity: 0.85;
+    transform: scale(0.94);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.36);
+  }
+}
+
+@keyframes reveal-exit-up {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -18px, 0);
+  }
+}
+
+.reveal-perspective {
+  perspective: 1400px;
+}
+
+.reveal-preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.reveal-backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.reveal-diag-pattern {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(245, 185, 33, 0.09) 0px,
+    rgba(245, 185, 33, 0.09) 2px,
+    transparent 2px,
+    transparent 18px
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-motion-flip-front {
+    animation: none !important;
+    transform: rotateY(0deg) !important;
+  }
+  .reveal-motion-flip-back {
+    display: none !important;
+  }
+  .reveal-motion-bob,
+  .reveal-motion-shine,
+  .reveal-motion-shake,
+  .reveal-motion-ring {
+    animation: none !important;
+  }
+  .reveal-motion-simple {
+    animation-name: reveal-backdrop-in !important;
+  }
+}
+
 /* Clean broadcast scrollbar for Rule Book modal */
 .broadcast-scroll::-webkit-scrollbar {
   width: 6px;
