@@ -634,6 +634,10 @@ export function JoinRoomPanel() {
           </div>
         )}
 
+        <div className="rounded-[4px] border border-[#F5B921]/35 bg-[#F5B921]/10 px-3.5 py-2.5 text-xs leading-relaxed text-[#F5B921]">
+          You must stay in fullscreen. Leaving fullscreen, pressing Esc or switching tabs removes your team immediately.
+        </div>
+
         <Button
           type="submit"
           variant="cyan"

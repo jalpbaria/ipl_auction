@@ -10,6 +10,7 @@ export interface DbRoom {
   overseas_max: number;
   bid_timer_seconds: number;
   auction_open: boolean;
+  anticheat_enabled?: boolean;
   status: string;
   created_at: string;
 }
@@ -165,4 +166,54 @@ export interface DbProfile {
   avatar_url: string | null;
   rules_accepted_at: string | null;
   created_at: string;
+}
+
+export type ViolationType = 'tab_switch' | 'esc_fullscreen';
+
+export type AllViolationType =
+  | 'tab_switch'
+  | 'esc_fullscreen'
+  | 'multiple_login'
+  | 'other';
+
+export interface ViolationTeamRef {
+  short_code: string;
+  name: string;
+}
+
+export interface ViolationWithTeam {
+  id: string;
+  team_id: string;
+  type: AllViolationType | string;
+  details: string | null;
+  created_at: string;
+  teams: ViolationTeamRef | null;
+}
+
+export interface DbTeamPresence {
+  team_id: string;
+  room_id: string;
+  last_seen_at: string;
+}
+
+export type HeartbeatStatus = 'active' | 'removed' | 'open' | 'none';
+
+export interface MyTeamStatus {
+  status: HeartbeatStatus;
+  team_id: string | null;
+  short_code: string | null;
+  name: string | null;
+  request_id: string | null;
+  request_status: RejoinRequestStatus | null;
+  last_violation_type: string | null;
+}
+
+export interface ReportViolationResult {
+  removed: boolean;
+  enforced?: boolean;
+}
+
+export interface RejoinWithCodeResult {
+  team_id: string;
+  room_id: string;
 }

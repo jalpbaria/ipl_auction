@@ -10,8 +10,11 @@ import type {
   DbTeamCode,
   DbTeamFinance,
   DbTeamMember,
+  DbViolation,
   RoomPlayerStatus,
   RoomPlayerWithPlayer,
+  ViolationTeamRef,
+  ViolationWithTeam,
 } from '../types/database';
 
 interface RawRoomPlayerRow {
@@ -24,6 +27,15 @@ interface RawRoomPlayerRow {
   sold_price_lakhs: number | null;
   sold_at: string | null;
   players: DbPlayer | DbPlayer[] | null;
+}
+
+interface RawViolationRow {
+  id: string;
+  team_id: string;
+  type: string;
+  details: string | null;
+  created_at: string;
+  teams: ViolationTeamRef | ViolationTeamRef[] | null;
 }
 
 function normalizeRoomPlayer(row: RawRoomPlayerRow): RoomPlayerWithPlayer {
@@ -41,6 +53,18 @@ function normalizeRoomPlayer(row: RawRoomPlayerRow): RoomPlayerWithPlayer {
   };
 }
 
+function normalizeViolation(row: RawViolationRow): ViolationWithTeam {
+  const teamRef = Array.isArray(row.teams) ? (row.teams[0] ?? null) : row.teams;
+  return {
+    id: row.id,
+    team_id: row.team_id,
+    type: row.type,
+    details: row.details ?? null,
+    created_at: row.created_at,
+    teams: teamRef,
+  };
+}
+
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const idx = list.findIndex((x) => x.id === item.id);
   if (idx === -1) return [...list, item];
@@ -49,10 +73,25 @@ function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   return next;
 }
 
+function readReportsSeenAt(roomId: string): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = window.localStorage.getItem(`ipl_reports_seen_${roomId}`);
+    if (!raw) return 0;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export interface RecentCodeEntry {
   code: string;
   expiresAt: number;
 }
+
+const ROOM_SELECT =
+  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, bid_timer_seconds, auction_open, anticheat_enabled, status, created_at';
 
 interface HostRoomState {
   roomId: string | null;
@@ -64,6 +103,11 @@ interface HostRoomState {
   rejoinRequests: DbRejoinRequest[];
   roomPlayers: RoomPlayerWithPlayer[];
   notices: DbNotice[];
+  violations: ViolationWithTeam[];
+  violationsLoading: boolean;
+  violationsError: string | null;
+  reportsSeenAtMs: number;
+  lastHostRemovalAt: number | null;
   auctionPhase: AuctionPhase | null;
   recentPlainCodes: Record<string, RecentCodeEntry>;
   loading: boolean;
@@ -73,8 +117,11 @@ interface HostRoomState {
   subscribeRealtime: (
     roomId: string,
     onNewRejoinRequest: (teamName: string) => void,
+    onNewViolation?: (violation: ViolationWithTeam) => void,
   ) => () => void;
   setRecentPlainCode: (teamId: string, code: string) => void;
+  markReportsSeen: (roomId: string, atMs?: number) => void;
+  markHostRemoval: () => void;
   refreshRoom: () => Promise<void>;
   refreshTeamsAndFinances: () => Promise<void>;
   refreshTeamCodes: () => Promise<void>;
@@ -82,6 +129,7 @@ interface HostRoomState {
   refreshRejoinRequests: () => Promise<void>;
   refreshRoomPlayers: () => Promise<void>;
   refreshNotices: () => Promise<void>;
+  refreshViolations: () => Promise<void>;
   reset: () => void;
 }
 
@@ -97,6 +145,11 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
   rejoinRequests: [],
   roomPlayers: [],
   notices: [],
+  violations: [],
+  violationsLoading: false,
+  violationsError: null,
+  reportsSeenAtMs: 0,
+  lastHostRemovalAt: null,
   auctionPhase: null,
   recentPlainCodes: {},
   loading: true,
@@ -132,6 +185,22 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     codeTimers.set(teamId, timerId);
   },
 
+  markReportsSeen: (roomId: string, atMs?: number) => {
+    const seenAt = atMs ?? Date.now();
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(`ipl_reports_seen_${roomId}`, String(seenAt));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+    set({ reportsSeenAtMs: seenAt });
+  },
+
+  markHostRemoval: () => {
+    set({ lastHostRemovalAt: Date.now() });
+  },
+
   loadHostRoom: async (roomId: string, currentUserId: string) => {
     if (!supabase) {
       set({
@@ -142,14 +211,19 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       return;
     }
 
-    set({ roomId, loading: true, error: null });
+    set({
+      roomId,
+      loading: true,
+      error: null,
+      violationsLoading: true,
+      violationsError: null,
+      reportsSeenAtMs: readReportsSeenAt(roomId),
+    });
 
     try {
       const { data: roomData, error: roomErr } = await supabase
         .from('rooms')
-        .select(
-          'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, bid_timer_seconds, auction_open, status, created_at',
-        )
+        .select(ROOM_SELECT)
         .eq('id', roomId)
         .maybeSingle();
 
@@ -174,6 +248,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         playersRes,
         noticesRes,
         auctionStateRes,
+        violationsRes,
       ] = await Promise.all([
         supabase
           .from('teams')
@@ -215,6 +290,11 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
           .select('phase')
           .eq('room_id', roomId)
           .maybeSingle(),
+        supabase
+          .from('violations')
+          .select('id, type, details, created_at, team_id, teams(short_code, name)')
+          .eq('room_id', roomId)
+          .order('created_at', { ascending: false }),
       ]);
 
       if (teamsRes.error) throw new Error(teamsRes.error.message);
@@ -246,6 +326,10 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
 
       const phaseRow = auctionStateRes.data as { phase?: AuctionPhase } | null;
 
+      const loadedViolations = violationsRes.error
+        ? []
+        : ((violationsRes.data as RawViolationRow[]) ?? []).map(normalizeViolation);
+
       set({
         room: typedRoom,
         teams: loadedTeams,
@@ -255,6 +339,9 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
         rejoinRequests: (rejoinRes.data as DbRejoinRequest[]) ?? [],
         roomPlayers: normalizedPlayers,
         notices: (noticesRes.data as DbNotice[]) ?? [],
+        violations: loadedViolations,
+        violationsLoading: false,
+        violationsError: violationsRes.error ? violationsRes.error.message : null,
         auctionPhase: phaseRow?.phase ?? null,
         loading: false,
         error: null,
@@ -262,13 +349,14 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     } catch (err) {
       set({
         loading: false,
+        violationsLoading: false,
         error:
           err instanceof Error ? err.message : 'Unable to load host command console.',
       });
     }
   },
 
-  subscribeRealtime: (roomId: string, onNewRejoinRequest) => {
+  subscribeRealtime: (roomId: string, onNewRejoinRequest, onNewViolation) => {
     if (!supabase) return () => {};
 
     const client = supabase;
@@ -398,6 +486,40 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       .on(
         'postgres_changes',
         {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'violations',
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          if (!payload.new) return;
+          const row = payload.new as DbViolation;
+          const existed = get().violations.some((v) => v.id === row.id);
+          const team = get().teams.find((t) => t.id === row.team_id);
+          const enriched: ViolationWithTeam = {
+            id: row.id,
+            team_id: row.team_id,
+            type: row.type,
+            details: row.details ?? null,
+            created_at: row.created_at,
+            teams: team ? { short_code: team.short_code, name: team.name } : null,
+          };
+
+          set((state) => ({
+            violations: upsertById(state.violations, enriched).sort(
+              (a, b) =>
+                new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+            ),
+          }));
+
+          if (!existed) {
+            onNewViolation?.(enriched);
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
           event: '*',
           schema: 'public',
           table: 'room_players',
@@ -498,9 +620,7 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     if (!supabase || !roomId) return;
     const { data, error } = await supabase
       .from('rooms')
-      .select(
-        'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, bid_timer_seconds, auction_open, status, created_at',
-      )
+      .select(ROOM_SELECT)
       .eq('id', roomId)
       .maybeSingle();
     if (!error && data) {
@@ -602,6 +722,33 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
     }
   },
 
+  refreshViolations: async () => {
+    const { roomId } = get();
+    if (!supabase || !roomId) return;
+
+    set({ violationsLoading: true, violationsError: null });
+    const { data, error } = await supabase
+      .from('violations')
+      .select('id, type, details, created_at, team_id, teams(short_code, name)')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      set({
+        violationsLoading: false,
+        violationsError: error.message || 'Unable to load violation log.',
+      });
+      return;
+    }
+
+    const normalized = ((data as RawViolationRow[]) ?? []).map(normalizeViolation);
+    set({
+      violations: normalized,
+      violationsLoading: false,
+      violationsError: null,
+    });
+  },
+
   reset: () => {
     codeTimers.forEach((timerId) => window.clearTimeout(timerId));
     codeTimers.clear();
@@ -615,6 +762,11 @@ export const useHostRoom = create<HostRoomState>((set, get) => ({
       rejoinRequests: [],
       roomPlayers: [],
       notices: [],
+      violations: [],
+      violationsLoading: false,
+      violationsError: null,
+      reportsSeenAtMs: 0,
+      lastHostRemovalAt: null,
       auctionPhase: null,
       recentPlainCodes: {},
       loading: true,

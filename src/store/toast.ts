@@ -12,6 +12,9 @@ export interface ToastItem {
   id: string;
   title: string;
   description?: string;
+  metaText?: string;
+  teamCode?: string;
+  leftBorderRed?: boolean;
   tone: ToastTone;
   position?: ToastPosition;
   action?: ToastAction;
@@ -32,9 +35,20 @@ export const useToastStore = create<ToastStoreState>((set) => ({
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    set((state) => ({
-      toasts: [...state.toasts.slice(-4), { ...toast, id }],
-    }));
+    set((state) => {
+      const targetPos: ToastPosition = toast.position ?? 'bottom-right';
+      if (targetPos === 'top-right') {
+        const currentTop = state.toasts.filter((t) => t.position === 'top-right');
+        const currentBottom = state.toasts.filter((t) => t.position !== 'top-right');
+        const nextTop = [{ ...toast, id }, ...currentTop].slice(0, 4);
+        return { toasts: [...nextTop, ...currentBottom] };
+      }
+
+      const currentTop = state.toasts.filter((t) => t.position === 'top-right');
+      const currentBottom = state.toasts.filter((t) => t.position !== 'top-right');
+      const nextBottom = [...currentBottom.slice(-3), { ...toast, id }];
+      return { toasts: [...currentTop, ...nextBottom] };
+    });
 
     const duration = toast.durationMs ?? 4500;
     if (typeof window !== 'undefined' && duration > 0) {

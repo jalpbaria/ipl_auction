@@ -1,5 +1,6 @@
 import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
 import { type ToastItem, type ToastTone, useToastStore } from '../../store/toast';
+import { TeamCrest } from '../host/TeamCrest';
 
 const TONE_STYLES: Record<
   ToastTone,
@@ -47,14 +48,27 @@ function ToastStack({
       {items.map((toast) => {
         const style = TONE_STYLES[toast.tone];
         const Icon = style.Icon;
+        const leftBorderClass = toast.leftBorderRed
+          ? 'border-l-4 border-l-red-500'
+          : '';
 
         return (
           <div
             key={toast.id}
             role="status"
-            className={`pointer-events-auto flex items-start gap-3 rounded-[4px] border bg-[#0E1524] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.65)] ${style.border}`}
+            className={`pointer-events-auto flex items-start gap-3 rounded-[4px] border bg-[#0E1524] p-3.5 shadow-[0_12px_32px_rgba(0,0,0,0.65)] ${style.border} ${leftBorderClass}`}
           >
-            <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${style.accent}`} aria-hidden="true" />
+            {toast.teamCode ? (
+              <div className="mt-0.5 shrink-0">
+                <TeamCrest shortCode={toast.teamCode} size="sm" />
+              </div>
+            ) : (
+              <Icon
+                className={`mt-0.5 h-4 w-4 shrink-0 ${style.accent}`}
+                aria-hidden="true"
+              />
+            )}
+
             <div className="min-w-0 flex-1">
               <p className="font-mono text-xs font-semibold uppercase tracking-[0.06em] text-[#E8ECF4]">
                 {toast.title}
@@ -62,6 +76,11 @@ function ToastStack({
               {toast.description && (
                 <p className="mt-1 text-xs leading-relaxed text-[#8B95AA]">
                   {toast.description}
+                </p>
+              )}
+              {toast.metaText && (
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[#8B95AA] tabular-nums">
+                  {toast.metaText}
                 </p>
               )}
               {toast.action && (
@@ -98,8 +117,8 @@ export function ToastViewport() {
 
   if (toasts.length === 0) return null;
 
-  const topRight = toasts.filter((t) => t.position === 'top-right');
-  const bottomRight = toasts.filter((t) => t.position !== 'top-right');
+  const topRight = toasts.filter((t) => t.position === 'top-right').slice(0, 4);
+  const bottomRight = toasts.filter((t) => t.position !== 'top-right').slice(-4);
 
   return (
     <>

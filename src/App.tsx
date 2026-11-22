@@ -22,8 +22,10 @@ import HostOverview from './pages/host/HostOverview';
 import HostPlayers from './pages/host/HostPlayers';
 import HostPurseControl from './pages/host/HostPurseControl';
 import HostRejoinRequests from './pages/host/HostRejoinRequests';
+import HostReports from './pages/host/HostReports';
 import HostSettings from './pages/host/HostSettings';
 import HostTeamCodes from './pages/host/HostTeamCodes';
+import PlayLayout from './pages/play/PlayLayout';
 import { useAuthStore } from './store/auth';
 
 const TOUCH_SESSION_INTERVAL_MS = 45_000;
@@ -100,24 +102,20 @@ export default function App() {
             <Route path="players" element={<HostPlayers />} />
             <Route path="notices" element={<HostNotices />} />
             <Route path="purse" element={<HostPurseControl />} />
+            <Route path="reports" element={<HostReports />} />
             <Route path="settings" element={<HostSettings />} />
           </Route>
           <Route
             path="/play/:roomId"
             element={
               <ProtectedRoute>
-                <PlayRoom />
+                <PlayLayout />
               </ProtectedRoute>
             }
-          />
-          <Route
-            path="/play/:roomId/auction"
-            element={
-              <ProtectedRoute>
-                <TeamAuction />
-              </ProtectedRoute>
-            }
-          />
+          >
+            <Route index element={<PlayRoom />} />
+            <Route path="auction" element={<TeamAuction />} />
+          </Route>
           <Route path="/host" element={<Navigate to="/rooms" replace />} />
           <Route path="/play" element={<Navigate to="/rooms" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />

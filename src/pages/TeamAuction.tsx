@@ -200,7 +200,6 @@ export default function TeamAuction() {
   }, [teams, verifiedTeam]);
 
   const activeTeam: MyTeamSummary | null = liveTeamRow ?? verifiedTeam;
-  const wasRemoved = liveTeamRow?.status === 'removed';
 
   // Apply --team-primary and --team-secondary CSS variables
   const teamPalette = useMemo(
@@ -290,7 +289,6 @@ export default function TeamAuction() {
       !roomId ||
       !room?.auction_open ||
       !activeTeam ||
-      wasRemoved ||
       !state ||
       state.phase !== 'bidding' ||
       !state.timer_ends_at
@@ -340,7 +338,6 @@ export default function TeamAuction() {
     roomId,
     room?.auction_open,
     activeTeam,
-    wasRemoved,
     state,
     offsetMs,
     refetch,
@@ -457,7 +454,6 @@ export default function TeamAuction() {
   const canRaise =
     Boolean(room?.auction_open) &&
     Boolean(activeTeam) &&
-    !wasRemoved &&
     raiseDisableReason === null;
 
   const handleRaiseBid = useCallback(async () => {
@@ -531,7 +527,7 @@ export default function TeamAuction() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (!room?.auction_open || wasRemoved || !activeTeam) return;
+      if (!room?.auction_open || !activeTeam) return;
 
       const isRaiseTrigger = event.code === 'Space' || event.key === 'Enter';
       if (!isRaiseTrigger) return;
@@ -563,7 +559,7 @@ export default function TeamAuction() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [room?.auction_open, wasRemoved, activeTeam, canRaise, handleRaiseBid]);
+  }, [room?.auction_open, activeTeam, canRaise, handleRaiseBid]);
 
   // Render guards
   const isInitialLoading = teamCheckLoading || (Boolean(verifiedTeam) && auctionLoading);
@@ -643,33 +639,6 @@ export default function TeamAuction() {
           </p>
           <div className="mt-6 flex items-center gap-3">
             <Link to="/rooms">
-              <Button variant="outline" size="md">
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back</span>
-              </Button>
-            </Link>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (wasRemoved) {
-    return (
-      <div
-        ref={rootRef}
-        className="min-h-screen bg-[#070B14] text-[#E8ECF4] broadcast-grid flex items-center justify-center p-6"
-      >
-        <Card brackets bracketTone="gold" className="w-full max-w-lg p-8">
-          <Badge tone="danger">FRANCHISE REMOVED</Badge>
-          <h1 className="mt-3 font-display text-4xl tracking-wide text-red-300">
-            SESSION ENDED
-          </h1>
-          <p className="mt-2 text-sm text-[#E8ECF4]">
-            You have been removed from the room
-          </p>
-          <div className="mt-6 flex items-center gap-3">
-            <Link to={`/play/${roomId}`}>
               <Button variant="outline" size="md">
                 <ArrowLeft className="h-4 w-4" />
                 <span>Back</span>

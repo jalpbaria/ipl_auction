@@ -16,20 +16,37 @@ import {
   Tv,
   UserCheck,
   Users,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Tag } from '../components/ui/Tag';
+import {
+  isHostSoundMuted,
+  playViolationAlertBeep,
+  setHostSoundMuted,
+} from '../lib/sound';
+import { formatTime12h, formatViolationReason } from '../lib/time';
 import { useAuthStore } from '../store/auth';
 import { useHostRoom } from '../store/hostRoom';
 import { useToastStore } from '../store/toast';
+import type { ViolationWithTeam } from '../types/database';
 
 export default function HostLayout() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const session = useAuthStore((s) => s.session);
   const profile = useAuthStore((s) => s.profile);
@@ -38,42 +55,114 @@ export default function HostLayout() {
 
   const room = useHostRoom((s) => s.room);
   const rejoinRequests = useHostRoom((s) => s.rejoinRequests);
+  const violations = useHostRoom((s) => s.violations);
+  const reportsSeenAtMs = useHostRoom((s) => s.reportsSeenAtMs);
   const auctionPhase = useHostRoom((s) => s.auctionPhase);
   const loading = useHostRoom((s) => s.loading);
   const error = useHostRoom((s) => s.error);
   const loadHostRoom = useHostRoom((s) => s.loadHostRoom);
   const subscribeRealtime = useHostRoom((s) => s.subscribeRealtime);
+  const markReportsSeen = useHostRoom((s) => s.markReportsSeen);
   const reset = useHostRoom((s) => s.reset);
 
   const [loggingOut, setLoggingOut] = useState(false);
+  const [soundMuted, setSoundMuted] = useState<boolean>(() => isHostSoundMuted());
 
   const userId = session?.user.id;
   const userEmail = profile?.email || session?.user.email || '';
+
+  const isReportsRoute = Boolean(
+    roomId && location.pathname.includes(`/host/${roomId}/reports`),
+  );
+
+  // Clear unread violation badge whenever host opens or stays on Reports
+  useEffect(() => {
+    if (!roomId || !isReportsRoute) return;
+    markReportsSeen(roomId, Date.now());
+  }, [roomId, isReportsRoute, violations.length, markReportsSeen]);
 
   useEffect(() => {
     if (!roomId || !userId) return;
 
     void loadHostRoom(roomId, userId);
 
-    const unsubscribe = subscribeRealtime(roomId, (teamName) => {
+    const handleNewViolation = (violation: ViolationWithTeam) => {
+      const state = useHostRoom.getState();
+      const teamName =
+        violation.teams?.name || violation.teams?.short_code || 'A team';
+      const teamCode = violation.teams?.short_code || 'TEAM';
+
+      const isRecentHostRemoval =
+        violation.type === 'other' &&
+        Boolean(violation.details?.startsWith('Removed by host')) &&
+        state.lastHostRemovalAt !== null &&
+        Date.now() - state.lastHostRemovalAt <= 5_000;
+
+      if (isRecentHostRemoval) {
+        showToast({
+          title: `${teamName} removed by host`,
+          description: violation.details || 'Franchise session closed by host.',
+          tone: 'info',
+          durationMs: 4500,
+        });
+        return;
+      }
+
+      playViolationAlertBeep();
+
       showToast({
-        title: `${teamName} is asking to re-enter`,
-        description: 'A removed franchise requested a new one-time code.',
-        tone: 'warning',
+        title: `${teamName} removed`,
+        description: formatViolationReason(violation.type),
+        metaText: formatTime12h(violation.created_at),
+        teamCode,
+        leftBorderRed: true,
+        tone: 'error',
         position: 'top-right',
-        durationMs: 9000,
+        durationMs: 12_000,
         action: {
-          label: 'View requests',
-          onClick: () => navigate(`/host/${roomId}/rejoin`),
+          label: 'View report',
+          onClick: () => navigate(`/host/${roomId}/reports`),
         },
       });
-    });
+    };
+
+    const unsubscribe = subscribeRealtime(
+      roomId,
+      (teamName) => {
+        showToast({
+          title: `${teamName} is asking to re-enter`,
+          description: 'A removed franchise requested a new one-time code.',
+          tone: 'warning',
+          position: 'top-right',
+          durationMs: 9000,
+          action: {
+            label: 'View requests',
+            onClick: () => navigate(`/host/${roomId}/rejoin`),
+          },
+        });
+      },
+      handleNewViolation,
+    );
 
     return () => {
       unsubscribe();
       reset();
     };
   }, [roomId, userId, loadHostRoom, subscribeRealtime, reset, showToast, navigate]);
+
+  const handleToggleSound = () => {
+    const nextMuted = !soundMuted;
+    setSoundMuted(nextMuted);
+    setHostSoundMuted(nextMuted);
+    showToast({
+      title: nextMuted ? 'Alert sound muted' : 'Alert sound enabled',
+      description: nextMuted
+        ? 'Floating alerts remain visible without audio chime.'
+        : 'Violation alerts will play a short audio chime.',
+      tone: 'info',
+      durationMs: 3000,
+    });
+  };
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -94,12 +183,21 @@ export default function HostLayout() {
     (r) => r.status === 'pending',
   ).length;
 
+  const unreadViolationsCount = useMemo(() => {
+    if (isReportsRoute) return 0;
+    return violations.filter((v) => {
+      const ms = Date.parse(v.created_at);
+      return !Number.isNaN(ms) && ms > reportsSeenAtMs;
+    }).length;
+  }, [violations, reportsSeenAtMs, isReportsRoute]);
+
   const activeNavItems = [
     {
       to: `/host/${roomId}/overview`,
       label: 'Overview',
       icon: LayoutDashboard,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
       liveDot: false,
     },
     {
@@ -107,6 +205,7 @@ export default function HostLayout() {
       label: 'Auction Control',
       icon: Gavel,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
       liveDot: auctionPhase === 'bidding',
     },
     {
@@ -114,6 +213,7 @@ export default function HostLayout() {
       label: 'Team Codes',
       icon: KeyRound,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
       liveDot: false,
     },
     {
@@ -121,6 +221,7 @@ export default function HostLayout() {
       label: 'Re-entry Requests',
       icon: UserCheck,
       badgeCount: pendingRejoinCount,
+      badgeTone: 'gold' as const,
       liveDot: false,
     },
     {
@@ -128,6 +229,7 @@ export default function HostLayout() {
       label: 'Players',
       icon: Users,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
       liveDot: false,
     },
     {
@@ -135,6 +237,7 @@ export default function HostLayout() {
       label: 'Notices and Room Lock',
       icon: Bell,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
       liveDot: false,
     },
     {
@@ -142,6 +245,15 @@ export default function HostLayout() {
       label: 'Purse Control',
       icon: Coins,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
+      liveDot: false,
+    },
+    {
+      to: `/host/${roomId}/reports`,
+      label: 'Reports',
+      icon: FileText,
+      badgeCount: unreadViolationsCount,
+      badgeTone: 'red' as const,
       liveDot: false,
     },
     {
@@ -149,6 +261,7 @@ export default function HostLayout() {
       label: 'Settings',
       icon: Settings,
       badgeCount: 0,
+      badgeTone: 'gold' as const,
       liveDot: false,
     },
   ];
@@ -156,7 +269,6 @@ export default function HostLayout() {
   const disabledNavItems = [
     { label: 'Squad Analysis', icon: BarChart3 },
     { label: 'Leaderboard', icon: Trophy },
-    { label: 'Reports', icon: FileText },
     { label: 'Projector Room', icon: Tv },
   ];
 
@@ -232,11 +344,32 @@ export default function HostLayout() {
             </span>
           </div>
 
-          {/* Right: Logged in as <email> + Disabled Open Projector + Logout */}
-          <div className="flex items-center gap-3 shrink-0">
-            <span className="hidden xl:inline-block font-mono text-[11px] text-[#8B95AA] truncate max-w-[240px]">
+          {/* Right: Logged in as <email> + Sound Toggle + Disabled Open Projector + Logout */}
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
+            <span className="hidden xl:inline-block font-mono text-[11px] text-[#8B95AA] truncate max-w-[220px]">
               Logged in as <span className="text-[#E8ECF4]">{userEmail}</span>
             </span>
+
+            <button
+              type="button"
+              onClick={handleToggleSound}
+              aria-label={soundMuted ? 'Unmute violation alerts' : 'Mute violation alerts'}
+              title={soundMuted ? 'Alert sound muted (click to unmute)' : 'Alert sound on (click to mute)'}
+              className={`inline-flex h-8 items-center gap-1.5 rounded-[4px] border px-2.5 font-mono text-[10px] uppercase tracking-[0.08em] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#22D3EE] ${
+                soundMuted
+                  ? 'border-white/15 bg-[#0E1524] text-[#8B95AA] hover:border-white/30 hover:text-[#E8ECF4]'
+                  : 'border-[#22D3EE]/40 bg-[#0E1524] text-[#22D3EE] hover:border-[#22D3EE]'
+              }`}
+            >
+              {soundMuted ? (
+                <VolumeX className="h-3.5 w-3.5" aria-hidden="true" />
+              ) : (
+                <Volume2 className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              <span className="hidden lg:inline">
+                {soundMuted ? 'Muted' : 'Alerts On'}
+              </span>
+            </button>
 
             <div className="group relative inline-flex">
               <Button
@@ -290,6 +423,11 @@ export default function HostLayout() {
               <nav className="space-y-1">
                 {activeNavItems.map((item) => {
                   const Icon = item.icon;
+                  const badgeStyle =
+                    item.badgeTone === 'red'
+                      ? 'bg-red-500 text-white'
+                      : 'bg-[#F5B921] text-[#070B14]';
+
                   return (
                     <NavLink
                       key={item.to}
@@ -326,11 +464,15 @@ export default function HostLayout() {
                       {item.badgeCount > 0 && (
                         <>
                           {/* Expanded badge */}
-                          <span className="hidden min-[1100px]:inline-flex h-5 min-w-[20px] items-center justify-center rounded-[2px] bg-[#F5B921] px-1.5 font-mono text-[10px] font-bold text-[#070B14] tabular-nums">
+                          <span
+                            className={`hidden min-[1100px]:inline-flex h-5 min-w-[20px] items-center justify-center rounded-[2px] px-1.5 font-mono text-[10px] font-bold tabular-nums ${badgeStyle}`}
+                          >
                             {item.badgeCount}
                           </span>
                           {/* Collapsed icon-mode corner badge */}
-                          <span className="min-[1100px]:hidden absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-[2px] bg-[#F5B921] px-1 font-mono text-[9px] font-bold text-[#070B14] tabular-nums">
+                          <span
+                            className={`min-[1100px]:hidden absolute -top-1 -right-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-[2px] px-1 font-mono text-[9px] font-bold tabular-nums ${badgeStyle}`}
+                          >
                             {item.badgeCount}
                           </span>
                         </>

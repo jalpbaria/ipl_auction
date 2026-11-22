@@ -4,6 +4,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Card } from '../../components/ui/Card';
 import { CornerBrackets } from '../../components/ui/CornerBrackets';
 import { PLAYER_SKILLS, type PlayerSkill } from '../../data/categories';
+import { usePresence } from '../../hooks/usePresence';
 import { formatLakhs } from '../../lib/format';
 import { useHostRoom } from '../../store/hostRoom';
 import type { TeamStatus } from '../../types/database';
@@ -22,6 +23,8 @@ export default function HostOverview() {
   const teams = useHostRoom((s) => s.teams);
   const teamFinances = useHostRoom((s) => s.teamFinances);
   const roomPlayers = useHostRoom((s) => s.roomPlayers);
+
+  const { isTeamOnline } = usePresence(room?.id);
 
   const playerStats = useMemo(() => {
     let indian = 0;
@@ -220,9 +223,32 @@ export default function HostOverview() {
                     <p className="mt-2.5 truncate text-xs font-medium text-[#E8ECF4]" title={team.name}>
                       {team.name}
                     </p>
-                    <p className="mt-0.5 truncate font-mono text-[10px] uppercase tracking-[0.06em] text-[#8B95AA]">
-                      {team.leader_name ? team.leader_name : 'Unclaimed seat'}
-                    </p>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <p className="truncate font-mono text-[10px] uppercase tracking-[0.06em] text-[#8B95AA]">
+                        {team.leader_name ? team.leader_name : 'Unclaimed seat'}
+                      </p>
+                      {team.status === 'active' && (
+                        <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[9px] uppercase tracking-[0.08em]">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              isTeamOnline(team.id)
+                                ? 'bg-emerald-400'
+                                : 'bg-[#8B95AA]/50'
+                            }`}
+                            aria-hidden="true"
+                          />
+                          <span
+                            className={
+                              isTeamOnline(team.id)
+                                ? 'text-emerald-400'
+                                : 'text-[#8B95AA]'
+                            }
+                          >
+                            {isTeamOnline(team.id) ? 'ONLINE' : 'OFFLINE'}
+                          </span>
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-4 space-y-2 border-t border-white/[0.06] pt-3">

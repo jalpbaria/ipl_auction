@@ -1,6 +1,8 @@
-import { AlertTriangle, KeyRound, Loader2, Save, User } from 'lucide-react';
+import { AlertTriangle, KeyRound, Loader2, Save, Shield, User } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { EnforcementControl } from '../../components/host/EnforcementControl';
 import { FullResetModal } from '../../components/host/FullResetModal';
+import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { FormField, INPUT_BASE_CLASS } from '../../components/ui/FormField';
@@ -465,6 +467,28 @@ export default function HostSettings() {
           </form>
         </Card>
       </div>
+
+      {/* Anti-Cheat Enforcement */}
+      <Card brackets bracketTone="cyan" className="p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
+          <div className="flex items-center gap-2.5">
+            <Shield className="h-4 w-4 text-[#22D3EE]" aria-hidden="true" />
+            <h2 className="font-display text-2xl tracking-wide text-[#22D3EE]">
+              ANTI-CHEAT ENFORCEMENT
+            </h2>
+          </div>
+          <Badge tone={(room.anticheat_enabled ?? true) ? 'cyan' : 'gold'}>
+            {(room.anticheat_enabled ?? true) ? 'ANTI-CHEAT ON' : 'ANTI-CHEAT OFF'}
+          </Badge>
+        </div>
+
+        <div className="mt-5">
+          <EnforcementControl
+            roomId={room.id}
+            enabled={room.anticheat_enabled ?? true}
+          />
+        </div>
+      </Card>
 
       {/* Danger Panel */}
       <Card className="border-red-500/35 bg-red-500/5 p-6">

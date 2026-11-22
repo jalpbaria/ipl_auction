@@ -17,6 +17,7 @@ import { Card } from '../../components/ui/Card';
 import { INPUT_BASE_CLASS } from '../../components/ui/FormField';
 import { Modal } from '../../components/ui/Modal';
 import { Tag } from '../../components/ui/Tag';
+import { usePresence } from '../../hooks/usePresence';
 import { supabase } from '../../lib/supabase';
 import { useHostRoom } from '../../store/hostRoom';
 import { useToastStore } from '../../store/toast';
@@ -41,8 +42,10 @@ export default function HostTeamCodes() {
   const refreshTeamCodes = useHostRoom((s) => s.refreshTeamCodes);
   const refreshTeamsAndFinances = useHostRoom((s) => s.refreshTeamsAndFinances);
   const refreshTeamMembers = useHostRoom((s) => s.refreshTeamMembers);
+  const markHostRemoval = useHostRoom((s) => s.markHostRemoval);
 
   const showToast = useToastStore((s) => s.showToast);
+  const { isTeamOnline } = usePresence(room?.id);
 
   const [revealedIds, setRevealedIds] = useState<Record<string, boolean>>({});
   const [generatingAll, setGeneratingAll] = useState(false);
@@ -196,6 +199,7 @@ export default function HostTeamCodes() {
   const handleRemoveTeam = async () => {
     if (!supabase || !removeTarget) return;
     setRemoving(true);
+    markHostRemoval();
 
     try {
       const { error } = await supabase.rpc('remove_team', {
@@ -347,7 +351,30 @@ export default function HostTeamCodes() {
                     </td>
 
                     <td className="px-4 py-3.5">
-                      <Badge tone={chip.tone}>{chip.label}</Badge>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={chip.tone}>{chip.label}</Badge>
+                        {team.status === 'active' && (
+                          <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.08em]">
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                isTeamOnline(team.id)
+                                  ? 'bg-emerald-400'
+                                  : 'bg-[#8B95AA]/50'
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span
+                              className={
+                                isTeamOnline(team.id)
+                                  ? 'text-emerald-400'
+                                  : 'text-[#8B95AA]'
+                              }
+                            >
+                              {isTeamOnline(team.id) ? 'ONLINE' : 'OFFLINE'}
+                            </span>
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-4 py-3.5">
