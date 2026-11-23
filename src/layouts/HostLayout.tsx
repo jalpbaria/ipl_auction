@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  ArrowLeftRight,
   BarChart3,
   Bell,
   Coins,
@@ -18,6 +19,7 @@ import {
   Users,
   Volume2,
   VolumeX,
+  Zap,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -200,6 +202,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/auction`,
@@ -208,6 +212,40 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: auctionPhase === 'bidding',
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
+    },
+    {
+      to: `/host/${roomId}/accelerated`,
+      label: 'Accelerated Round',
+      icon: Zap,
+      badgeCount: 0,
+      badgeTone: 'gold' as const,
+      liveDot: false,
+      statusDotClass:
+        (room?.accel_status ?? 'off') === 'selecting'
+          ? 'bg-amber-400 animate-pulse'
+          : (room?.accel_status ?? 'off') === 'live'
+            ? 'bg-red-500 animate-pulse'
+            : (room?.accel_status ?? 'off') === 'done'
+              ? 'bg-emerald-400'
+              : 'bg-[#8B95AA]',
+      statusLabel: 'Accelerated status',
+    },
+    {
+      to: `/host/${roomId}/trade`,
+      label: 'Trade Window',
+      icon: ArrowLeftRight,
+      badgeCount: 0,
+      badgeTone: 'gold' as const,
+      liveDot: false,
+      statusDotClass:
+        (room?.trade_status ?? 'off') === 'open'
+          ? 'bg-emerald-400 animate-pulse'
+          : (room?.trade_status ?? 'off') === 'closed'
+            ? 'bg-red-500'
+            : 'bg-[#8B95AA]',
+      statusLabel: 'Trade window status',
     },
     {
       to: `/host/${roomId}/codes`,
@@ -216,6 +254,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/rejoin`,
@@ -224,6 +264,8 @@ export default function HostLayout() {
       badgeCount: pendingRejoinCount,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/players`,
@@ -232,6 +274,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/notices`,
@@ -240,6 +284,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/purse`,
@@ -248,6 +294,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/reports`,
@@ -256,6 +304,8 @@ export default function HostLayout() {
       badgeCount: unreadViolationsCount,
       badgeTone: 'red' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/analysis`,
@@ -264,6 +314,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/leaderboard`,
@@ -272,6 +324,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/projector`,
@@ -280,6 +334,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
     {
       to: `/host/${roomId}/settings`,
@@ -288,6 +344,8 @@ export default function HostLayout() {
       badgeCount: 0,
       badgeTone: 'gold' as const,
       liveDot: false,
+      statusDotClass: null as string | null,
+      statusLabel: null as string | null,
     },
   ];
 
@@ -466,6 +524,19 @@ export default function HostLayout() {
                           <span
                             aria-label="Auction live"
                             className="min-[1100px]:hidden absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-[#22D3EE] animate-pulse"
+                          />
+                        </>
+                      )}
+
+                      {item.statusDotClass && (
+                        <>
+                          <span
+                            aria-label={item.statusLabel ?? 'Status'}
+                            className={`hidden min-[1100px]:inline-block h-2 w-2 rounded-full ${item.statusDotClass}`}
+                          />
+                          <span
+                            aria-label={item.statusLabel ?? 'Status'}
+                            className={`min-[1100px]:hidden absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${item.statusDotClass}`}
                           />
                         </>
                       )}

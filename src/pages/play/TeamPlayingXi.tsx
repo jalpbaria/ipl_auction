@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
   CheckCircle2,
   Lock,
   RefreshCw,
@@ -74,7 +75,7 @@ interface XiCheckRule {
 }
 
 const ROOM_SELECT =
-  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, leaderboard_public, bid_timer_seconds, auction_open, status, created_at';
+  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, bid_timer_seconds, auction_open, trade_status, trade_ends_at, status, created_at';
 
 const ROOM_PLAYER_SELECT =
   'id, base_price_lakhs, set_no, sort_order, status, sold_to_team_id, sold_price_lakhs, sold_at, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)';
@@ -184,6 +185,7 @@ export default function TeamPlayingXi() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [hasAcceptedTrade, setHasAcceptedTrade] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const initializedSelectionRef = useRef(false);
@@ -243,7 +245,7 @@ export default function TeamPlayingXi() {
         const myTeam = teamData as MyTeamDetail;
         setTeam(myTeam);
 
-        const [roomRes, playersRes, xiRes] = await Promise.all([
+        const [roomRes, playersRes, xiRes, tradesRes] = await Promise.all([
           supabase.from('rooms').select(ROOM_SELECT).eq('id', roomId).maybeSingle(),
           supabase
             .from('room_players')
@@ -259,6 +261,13 @@ export default function TeamPlayingXi() {
             .eq('room_id', roomId)
             .eq('team_id', myTeam.id)
             .maybeSingle(),
+          supabase
+            .from('trades')
+            .select('id')
+            .eq('room_id', roomId)
+            .eq('status', 'accepted')
+            .or(`from_team_id.eq.${myTeam.id},to_team_id.eq.${myTeam.id}`)
+            .limit(1),
         ]);
 
         if (!mountedRef.current || seq !== requestSeqRef.current) return;
@@ -277,6 +286,9 @@ export default function TeamPlayingXi() {
 
         setRoom(nextRoom);
         setMySquad(squad);
+        setHasAcceptedTrade(
+          !tradesRes.error && Array.isArray(tradesRes.data) && tradesRes.data.length > 0,
+        );
 
         const rawXi = xiRes.data as DbPlayingXi | null;
         const dbIds = rawXi && Array.isArray(rawXi.room_player_ids)
@@ -404,6 +416,18 @@ export default function TeamPlayingXi() {
             setSavedCaptainId(null);
             setSavedAt(null);
           }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trades',
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => {
+          void loadXiData(true);
         },
       )
       .subscribe();
@@ -707,6 +731,19 @@ export default function TeamPlayingXi() {
           <Lock className="h-4 w-4 shrink-0 text-red-400" />
           <span className="font-mono uppercase tracking-[0.06em]">
             The host has locked the playing XI. Editing is disabled.
+          </span>
+        </div>
+      )}
+
+      {/* Cleared-by-trade Banner */}
+      {!hasSavedXi && hasAcceptedTrade && (
+        <div
+          role="status"
+          className="flex items-center gap-3 rounded-[4px] border border-[#22D3EE]/50 bg-[#22D3EE]/10 px-4 py-3 text-xs text-[#E8ECF4]"
+        >
+          <ArrowLeftRight className="h-4 w-4 shrink-0 text-[#22D3EE]" />
+          <span className="font-mono uppercase tracking-[0.06em]">
+            Your saved playing XI was cleared after a completed trade. Rebuild and save your starting 11 and captain.
           </span>
         </div>
       )}

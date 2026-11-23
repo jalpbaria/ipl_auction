@@ -17,6 +17,7 @@ import PlayRoom from './pages/PlayRoom';
 import ProjectorRoom from './pages/ProjectorRoom';
 import Rooms from './pages/Rooms';
 import TeamAuction from './pages/TeamAuction';
+import HostAccelerated from './pages/host/HostAccelerated';
 import HostAnalysis from './pages/host/HostAnalysis';
 import HostAuction from './pages/host/HostAuction';
 import HostLeaderboard from './pages/host/HostLeaderboard';
@@ -29,9 +30,11 @@ import HostRejoinRequests from './pages/host/HostRejoinRequests';
 import HostReports from './pages/host/HostReports';
 import HostSettings from './pages/host/HostSettings';
 import HostTeamCodes from './pages/host/HostTeamCodes';
+import HostTrade from './pages/host/HostTrade';
 import PlayLayout from './pages/play/PlayLayout';
-import TeamLeaderboard from './pages/play/TeamLeaderboard';
+import TeamAccelerated from './pages/play/TeamAccelerated';
 import TeamPlayingXi from './pages/play/TeamPlayingXi';
+import TeamTrade from './pages/play/TeamTrade';
 import { useAuthStore } from './store/auth';
 
 const TOUCH_SESSION_INTERVAL_MS = 45_000;
@@ -103,6 +106,8 @@ export default function App() {
             <Route index element={<Navigate to="overview" replace />} />
             <Route path="overview" element={<HostOverview />} />
             <Route path="auction" element={<HostAuction />} />
+            <Route path="accelerated" element={<HostAccelerated />} />
+            <Route path="trade" element={<HostTrade />} />
             <Route path="codes" element={<HostTeamCodes />} />
             <Route path="rejoin" element={<HostRejoinRequests />} />
             <Route path="players" element={<HostPlayers />} />
@@ -132,8 +137,9 @@ export default function App() {
           >
             <Route index element={<PlayRoom />} />
             <Route path="auction" element={<TeamAuction />} />
+            <Route path="accelerated" element={<TeamAccelerated />} />
+            <Route path="trade" element={<TeamTrade />} />
             <Route path="xi" element={<TeamPlayingXi />} />
-            <Route path="leaderboard" element={<TeamLeaderboard />} />
           </Route>
           <Route path="/host" element={<Navigate to="/rooms" replace />} />
           <Route path="/play" element={<Navigate to="/rooms" replace />} />

@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
   Check,
   ChevronDown,
   ChevronUp,
@@ -13,6 +15,7 @@ import {
   Volume2,
   VolumeX,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -68,6 +71,16 @@ function formatCountdownDuration(ms: number): string {
   return `${pad(mins)}m ${pad(secs)}s`;
 }
 
+function formatMmSsCountdown(endsAt: string | null, serverNowMs: number): string {
+  if (!endsAt) return '00:00';
+  const target = Date.parse(endsAt);
+  if (Number.isNaN(target)) return '00:00';
+  const sec = Math.max(0, Math.ceil((target - serverNowMs) / 1000));
+  const mins = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  return `${String(mins).padStart(2, '0')}:${String(remSec).padStart(2, '0')}`;
+}
+
 function formatBidTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '--:--:--';
@@ -116,6 +129,11 @@ export default function TeamAuction() {
     connectionStatus,
     offsetMs,
     reveal,
+    accelStatus,
+    accelSelectionEndsAt,
+    accelProgress,
+    tradeStatus,
+    tradeEndsAt,
     setProgress,
     setsOverview,
     setsLoading,
@@ -790,6 +808,12 @@ export default function TeamAuction() {
                 {room.name}
               </p>
             </div>
+            {accelStatus === 'live' && (
+              <Badge tone="danger" className="hidden sm:inline-flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                <span>ACCELERATED ROUND</span>
+              </Badge>
+            )}
           </div>
 
           {/* Team Purse, Squad, Overseas, Connection Status */}
@@ -888,6 +912,71 @@ export default function TeamAuction() {
 
       {/* MAIN LIVE STAGE (1280px+ 12-col layout) */}
       <main className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-4 p-4 sm:p-5 lg:p-6">
+        {tradeStatus === 'open' && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-emerald-400/60 bg-emerald-500/10 px-4 py-3"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] border border-emerald-400/50 bg-[#070B14] text-emerald-300">
+                <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-emerald-300">
+                  Trade window open
+                </p>
+                <p className="font-mono text-[11px] text-[#E8ECF4] tabular-nums">
+                  Window closes in{' '}
+                  <span className="font-bold text-emerald-300">
+                    {formatMmSsCountdown(tradeEndsAt, nowMs + offsetMs)}
+                  </span>{' '}
+                  · Swap 1 to 3 players with active franchises
+                </p>
+              </div>
+            </div>
+
+            <Link to={`/play/${roomId}/trade`} className="shrink-0">
+              <Button variant="gold" size="sm">
+                <span>Open Trade Desk</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          </div>
+        )}
+
+        {accelStatus === 'selecting' && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-amber-400/60 bg-amber-500/10 px-4 py-3"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] border border-amber-400/50 bg-[#070B14] text-amber-300">
+                <Zap className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-amber-300">
+                  Accelerated round: choose your players
+                </p>
+                <p className="font-mono text-[11px] text-[#E8ECF4] tabular-nums">
+                  Window closes in{' '}
+                  <span className="font-bold text-amber-300">
+                    {formatMmSsCountdown(accelSelectionEndsAt, nowMs + offsetMs)}
+                  </span>{' '}
+                  · Picks used {accelProgress?.my_picks ?? 0}/
+                  {accelProgress?.picks_limit ?? room.accel_picks_per_team ?? 5}
+                </p>
+              </div>
+            </div>
+
+            <Link to={`/play/${roomId}/accelerated`} className="shrink-0">
+              <Button variant="gold" size="sm">
+                <span>Choose Players</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            </Link>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
           {/* LEFT / CENTRE STAGE + RAISE PAD (8 cols) */}
           <div className="space-y-4 lg:col-span-8">
@@ -907,15 +996,24 @@ export default function TeamAuction() {
                 <div className="flex flex-col items-center gap-6 py-4 sm:flex-row">
                   <PlayerCard player={null} size="lg" />
                   <div className="flex-1 space-y-3 text-center sm:text-left">
-                    <Tag accent="cyan">
-                      SET {state?.current_set_no ?? 1} ·{' '}
-                      {currentSetInfo?.label ?? 'POOL'}
-                    </Tag>
+                    {accelStatus === 'live' ? (
+                      <Badge tone="danger">
+                        <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                        <span>ACCELERATED ROUND</span>
+                      </Badge>
+                    ) : (
+                      <Tag accent="cyan">
+                        SET {state?.current_set_no ?? 1} ·{' '}
+                        {currentSetInfo?.label ?? 'POOL'}
+                      </Tag>
+                    )}
                     <h1 className="font-display text-4xl sm:text-5xl tracking-wide text-[#E8ECF4]">
                       WAITING FOR THE HOST
                     </h1>
                     <p className="max-w-md text-sm text-[#8B95AA]">
-                      The auctioneer is preparing the next player on the block. Keep an eye on the Up Next set tracker.
+                      {accelStatus === 'live'
+                        ? 'The auctioneer is preparing the next player from the accelerated round.'
+                        : 'The auctioneer is preparing the next player on the block. Keep an eye on the Up Next set tracker.'}
                     </p>
                     <div className="pt-2">
                       <Countdown
@@ -943,6 +1041,12 @@ export default function TeamAuction() {
                     <div className="space-y-3">
                       {/* Lot code & phase tags */}
                       <div className="flex flex-wrap items-center gap-2">
+                        {accelStatus === 'live' && (
+                          <Badge tone="danger">
+                            <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                            <span>ACCELERATED ROUND</span>
+                          </Badge>
+                        )}
                         <span className="rounded-[2px] border border-[#22D3EE]/40 bg-[#070B14] px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-[0.1em] text-[#22D3EE]">
                           LOT {player.player_code}
                         </span>
@@ -1095,6 +1199,8 @@ export default function TeamAuction() {
                     variant="team"
                     teamColors={teamPalette}
                     soundOn={soundEnabled}
+                    accelMode={accelStatus === 'live'}
+                    accelRemaining={accelProgress?.queue_remaining ?? 0}
                   />
                 </div>
               )}
@@ -1330,9 +1436,70 @@ export default function TeamAuction() {
               </div>
 
               <div className="p-4">
-                {/* UP NEXT (Set-level progress & 8-set timeline — never shows pending players) */}
+                {/* UP NEXT (Accelerated Round OR Set-level progress & 8-set timeline — never shows pending players) */}
                 {rightTab === 'up-next' &&
                   (() => {
+                    if (accelStatus === 'live') {
+                      const total = accelProgress?.queue_total ?? 0;
+                      const remaining = accelProgress?.queue_remaining ?? 0;
+                      const done = Math.max(0, total - remaining);
+                      const pct =
+                        total > 0
+                          ? Math.min(100, Math.round((done / total) * 100))
+                          : 0;
+
+                      return (
+                        <div className="space-y-3.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-red-300">
+                              UP NEXT
+                            </span>
+                            <Badge tone="danger">ACCELERATED ROUND</Badge>
+                          </div>
+
+                          <div className="relative rounded-[4px] border border-red-500/45 bg-[#070B14] p-4">
+                            <CornerBrackets tone="gold" size="sm" />
+
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-red-300">
+                                SECOND CHANCE POOL
+                              </span>
+                              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#8B95AA] tabular-nums">
+                                {done}/{total} DONE
+                              </span>
+                            </div>
+
+                            <h3 className="mt-2 font-display text-4xl leading-none tracking-wide text-[#E8ECF4]">
+                              ACCELERATED ROUND
+                            </h3>
+
+                            <p className="mt-2 font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#F5B921] tabular-nums">
+                              {remaining} {remaining === 1 ? 'PLAYER' : 'PLAYERS'} LEFT
+                            </p>
+
+                            <div className="mt-3 space-y-1">
+                              <div className="h-2 w-full overflow-hidden rounded-[2px] border border-white/[0.08] bg-[#0E1524]">
+                                <div
+                                  style={{ width: `${pct}%` }}
+                                  className="h-full bg-red-500 transition-all duration-300"
+                                />
+                              </div>
+                              <div className="flex items-center justify-between font-mono text-[10px] text-[#8B95AA] tabular-nums">
+                                <span>
+                                  {done} / {total} RESOLVED
+                                </span>
+                                <span>{pct}%</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <p className="border-t border-white/[0.06] pt-2.5 font-mono text-[10px] leading-relaxed text-[#8B95AA]">
+                            The host decides the order.
+                          </p>
+                        </div>
+                      );
+                    }
+
                     if (
                       setsLoading &&
                       !setProgress &&

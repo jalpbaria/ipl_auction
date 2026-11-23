@@ -92,7 +92,7 @@ export interface RecentCodeEntry {
 }
 
 const ROOM_SELECT =
-  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, bid_timer_seconds, preview_seconds, auction_open, anticheat_enabled, projector_mode, leaderboard_public, status, created_at';
+  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, bid_timer_seconds, preview_seconds, auction_open, anticheat_enabled, projector_mode, leaderboard_public, accel_status, accel_picks_per_team, accel_selection_ends_at, trade_status, trade_ends_at, status, created_at';
 
 function normalizePlayingXi(row: {
   team_id: string;

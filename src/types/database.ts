@@ -1,6 +1,14 @@
 import type { PlayerCategory, PlayerSkill } from '../data/categories';
 
 export type ProjectorMode = 'auction' | 'squads' | 'leaderboard';
+export type AccelStatus = 'off' | 'selecting' | 'live' | 'done';
+export type TradeStatus = 'off' | 'open' | 'closed';
+export type TradeRowStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'cancelled'
+  | 'expired';
 
 export interface DbRoom {
   id: string;
@@ -18,8 +26,25 @@ export interface DbRoom {
   leaderboard_public?: boolean;
   xi_overseas_max?: number;
   xi_locked?: boolean;
+  accel_status?: AccelStatus;
+  accel_picks_per_team?: number;
+  accel_selection_ends_at?: string | null;
+  trade_status?: TradeStatus;
+  trade_ends_at?: string | null;
   status: string;
   created_at: string;
+}
+
+export interface DbTrade {
+  id: string;
+  room_id: string;
+  from_team_id: string;
+  to_team_id: string;
+  give_ids: string[];
+  get_ids: string[];
+  status: TradeRowStatus;
+  created_at: string;
+  resolved_at: string | null;
 }
 
 export type TeamStatus = 'open' | 'active' | 'removed';
@@ -248,4 +273,30 @@ export interface RpcSetProgressRow {
   total: number;
   remaining: number;
   done: number;
+}
+
+export interface DbAccelPick {
+  id: string;
+  room_id: string;
+  team_id: string;
+  room_player_id: string;
+  created_at: string;
+}
+
+export interface DbAccelQueueItem {
+  room_player_id: string;
+  room_id: string;
+  picks: number;
+  position: number;
+  done: boolean;
+}
+
+export interface AccelProgress {
+  status: AccelStatus;
+  ends_at: string | null;
+  picks_limit: number;
+  unsold_total: number;
+  queue_total: number;
+  queue_remaining: number;
+  my_picks: number;
 }

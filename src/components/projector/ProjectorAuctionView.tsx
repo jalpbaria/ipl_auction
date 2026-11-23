@@ -12,6 +12,8 @@ import {
 import { formatLakhs } from '../../lib/format';
 import { formatDateTime12h } from '../../lib/time';
 import type {
+  AccelProgress,
+  AccelStatus,
   DbAuctionState,
   DbBid,
   DbNotice,
@@ -36,6 +38,8 @@ interface ProjectorAuctionViewProps {
   offsetMs: number;
   setProgress: SetProgress | null;
   setsOverview: SetOverviewItem[];
+  accelStatus?: AccelStatus;
+  accelProgress?: AccelProgress | null;
 }
 
 function formatCountdownToIso(targetIso: string | null | undefined, nowMs: number): string | null {
@@ -64,6 +68,8 @@ export function ProjectorAuctionView({
   offsetMs,
   setProgress,
   setsOverview,
+  accelStatus = 'off',
+  accelProgress = null,
 }: ProjectorAuctionViewProps) {
   const prefersReducedMotion = useReducedMotion();
   const phase = state?.phase ?? 'idle';
@@ -319,8 +325,95 @@ export function ProjectorAuctionView({
     );
   }
 
-  // IDLE with Auction Open -> Large "NEXT UP" set panel + 8-set timeline strip (never reveals pending players)
+  // IDLE with Auction Open -> Accelerated Round OR Large "NEXT UP" set panel + 8-set timeline strip
   if (phase === 'idle' || !lot || !player) {
+    if (accelStatus === 'live') {
+      const accelTotal = accelProgress?.queue_total ?? 0;
+      const accelRemaining = accelProgress?.queue_remaining ?? 0;
+      const accelDone = Math.max(0, accelTotal - accelRemaining);
+      const accelPct =
+        accelTotal > 0
+          ? Math.min(100, Math.round((accelDone / accelTotal) * 100))
+          : 0;
+
+      return (
+        <div className="relative flex flex-1 min-h-0 flex-col justify-between bg-[#070B14] broadcast-grid">
+          <div className="flex flex-1 flex-col justify-between px-14 py-9">
+            <div className="flex items-end justify-between border-b border-white/10 pb-5">
+              <div>
+                <p className="font-mono text-lg uppercase tracking-[0.2em] text-red-400">
+                  SECOND CHANCE AUCTION // NOMINATED POOL
+                </p>
+                <h1 className="mt-1 font-display text-[84px] leading-none tracking-[0.04em] text-[#E8ECF4]">
+                  ACCELERATED <span className="text-[#F5B921]">ROUND</span>
+                </h1>
+              </div>
+              <span className="rounded-[4px] border border-red-500/60 bg-red-500/15 px-6 py-2.5 font-mono text-xl font-bold uppercase tracking-[0.12em] text-red-300">
+                AWAITING NEXT LOT
+              </span>
+            </div>
+
+            <div className="my-auto py-4">
+              <div className="relative rounded-[4px] border border-red-500/50 bg-[#0E1524] px-12 py-12">
+                <CornerBrackets tone="gold" size="md" />
+
+                <div className="flex items-center justify-between gap-8">
+                  <div className="min-w-0">
+                    <span className="inline-block rounded-[2px] border border-red-500/60 bg-red-500/15 px-4 py-1.5 font-mono text-xl font-bold uppercase tracking-[0.16em] text-red-300">
+                      ACCELERATED ROUND
+                    </span>
+
+                    <h2 className="mt-5 font-display text-[116px] leading-[0.9] tracking-[0.04em] text-[#E8ECF4] tabular-nums">
+                      {accelRemaining}{' '}
+                      <span className="text-[#F5B921]">
+                        {accelRemaining === 1 ? 'PLAYER' : 'PLAYERS'} LEFT
+                      </span>
+                    </h2>
+
+                    <p className="mt-4 font-mono text-2xl uppercase tracking-[0.12em] text-[#8B95AA]">
+                      THE HOST SELECTS THE ORDER OF REMAINING LOTS
+                    </p>
+                  </div>
+
+                  <div className="shrink-0 rounded-[4px] border border-white/15 bg-[#070B14] px-10 py-6 text-right">
+                    <p className="font-mono text-base uppercase tracking-[0.16em] text-[#8B95AA]">
+                      ROUND PROGRESS
+                    </p>
+                    <p className="mt-2 font-display text-[84px] leading-none text-[#22D3EE] tabular-nums">
+                      {accelDone}
+                      <span className="text-[52px] text-[#8B95AA]">
+                        /{accelTotal}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-10 space-y-2.5">
+                  <div className="h-6 w-full overflow-hidden rounded-[2px] border border-white/15 bg-[#070B14]">
+                    <div
+                      style={{ width: `${accelPct}%` }}
+                      className="h-full bg-red-500 transition-all duration-300"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between font-mono text-lg uppercase tracking-[0.12em] text-[#8B95AA] tabular-nums">
+                    <span>
+                      {accelDone} RESOLVED · {accelRemaining} REMAINING
+                    </span>
+                    <span className="font-bold text-[#F5B921]">
+                      {accelPct}% COMPLETE
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="h-8" />
+          </div>
+          {bottomStrip}
+        </div>
+      );
+    }
+
     const activeSetNo = setProgress?.setNo ?? state?.current_set_no ?? 1;
     const activeLabel =
       setProgress?.setLabel ?? currentSetInfo?.label ?? `Set ${activeSetNo}`;

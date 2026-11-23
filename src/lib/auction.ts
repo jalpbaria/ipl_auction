@@ -1,5 +1,11 @@
 import { PLAYER_CATEGORIES, type PlayerCategoryInfo } from '../data/categories';
-import type { AuctionPhase, DbAuctionState, DbRoom } from '../types/database';
+import type {
+  AccelProgress,
+  AccelStatus,
+  AuctionPhase,
+  DbAuctionState,
+  DbRoom,
+} from '../types/database';
 
 export const PHASE_LABEL: Record<AuctionPhase, string> = {
   idle: 'STANDBY',
@@ -30,6 +36,45 @@ export interface SetOverviewItem {
   total: number;
   remaining: number;
   done: number;
+}
+
+export function normalizeAccelProgress(
+  data: unknown,
+  fallbackRoom?: Pick<
+    DbRoom,
+    'accel_status' | 'accel_picks_per_team' | 'accel_selection_ends_at'
+  > | null,
+): AccelProgress {
+  const row = Array.isArray(data) ? data[0] : data;
+  const r =
+    row && typeof row === 'object' ? (row as Record<string, unknown>) : null;
+  const rawStatus = String(
+    r?.status ?? fallbackRoom?.accel_status ?? 'off',
+  ) as AccelStatus;
+  const status: AccelStatus =
+    rawStatus === 'selecting' ||
+    rawStatus === 'live' ||
+    rawStatus === 'done'
+      ? rawStatus
+      : 'off';
+
+  return {
+    status,
+    ends_at:
+      r?.ends_at !== undefined
+        ? r.ends_at
+          ? String(r.ends_at)
+          : null
+        : (fallbackRoom?.accel_selection_ends_at ?? null),
+    picks_limit: Math.max(
+      1,
+      Number(r?.picks_limit ?? fallbackRoom?.accel_picks_per_team ?? 5),
+    ),
+    unsold_total: Math.max(0, Number(r?.unsold_total ?? 0)),
+    queue_total: Math.max(0, Number(r?.queue_total ?? 0)),
+    queue_remaining: Math.max(0, Number(r?.queue_remaining ?? 0)),
+    my_picks: Math.max(0, Number(r?.my_picks ?? 0)),
+  };
 }
 
 export function normalizeSetProgress(
@@ -103,8 +148,8 @@ export function getReveal(
     return { active: false, elapsedMs: 0, remainingMs: 0, durationMs: 0 };
   }
 
-  const previewSec = room?.preview_seconds ?? 5;
-  const baseDurationMs = (previewSec > 0 ? previewSec : 5) * 1000;
+  const previewSec = room?.preview_seconds ?? 30;
+  const baseDurationMs = (previewSec > 0 ? previewSec : 30) * 1000;
   const durationMs = Math.max(rem, baseDurationMs);
   const elapsedMs = Math.max(0, durationMs - rem);
 

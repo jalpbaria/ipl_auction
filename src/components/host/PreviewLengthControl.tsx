@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useToastStore } from '../../store/toast';
 
-export const PREVIEW_LENGTH_OPTIONS = [0, 3, 5, 8, 10] as const;
+export const PREVIEW_LENGTH_OPTIONS = [0, 5, 10, 20, 30, 45, 60] as const;
 
 interface PreviewLengthControlProps {
   roomId: string;
@@ -79,7 +79,7 @@ export function PreviewLengthControl({
       <div
         role="group"
         aria-label="Player reveal length in seconds"
-        className="grid grid-cols-5 gap-1 rounded-[4px] border border-white/10 bg-[#070B14] p-1"
+        className="grid grid-cols-7 gap-1 rounded-[4px] border border-white/10 bg-[#070B14] p-1"
       >
         {PREVIEW_LENGTH_OPTIONS.map((sec) => {
           const active = currentSeconds === sec;
@@ -90,7 +90,7 @@ export function PreviewLengthControl({
               disabled={saving || disabled}
               onClick={() => void handleSelect(sec)}
               aria-pressed={active}
-              className={`rounded-[2px] font-mono font-semibold uppercase tracking-wider transition-colors tabular-nums ${
+              className={`rounded-[2px] px-0.5 font-mono font-semibold uppercase tracking-wider transition-colors tabular-nums ${
                 compact ? 'py-1 text-[10px]' : 'py-1.5 text-xs'
               } ${
                 active

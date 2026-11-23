@@ -1,11 +1,12 @@
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Gavel,
   LayoutDashboard,
   RefreshCw,
   Shield,
-  Trophy,
   Users,
+  Zap,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
@@ -20,8 +21,10 @@ import { formatLakhs } from '../../lib/format';
 import { supabase } from '../../lib/supabase';
 import { useToastStore } from '../../store/toast';
 import type {
+  AccelStatus,
   HeartbeatStatus,
   MyTeamStatus,
+  TradeStatus,
   ViolationType,
 } from '../../types/database';
 import { PlayThemeContext } from './playTheme';
@@ -69,6 +72,8 @@ interface ThemeProviderProps {
   teamId: string | null;
   shortCode: string | null;
   teamName: string | null;
+  accelStatus: AccelStatus;
+  tradeStatus: TradeStatus;
   children: React.ReactNode;
 }
 
@@ -77,6 +82,8 @@ function ThemeProvider({
   teamId,
   shortCode,
   teamName,
+  accelStatus,
+  tradeStatus,
   children,
 }: ThemeProviderProps) {
   const theme = useMemo(() => getTeamTheme(shortCode), [shortCode]);
@@ -164,10 +171,46 @@ function ThemeProvider({
   );
 
   const navItems = [
-    { to: `/play/${roomId}`, label: 'Dashboard', icon: LayoutDashboard, end: true },
-    { to: `/play/${roomId}/auction`, label: 'Auction Room', icon: Gavel, end: false },
-    { to: `/play/${roomId}/xi`, label: 'Playing XI', icon: Users, end: false },
-    { to: `/play/${roomId}/leaderboard`, label: 'Leaderboard', icon: Trophy, end: false },
+    {
+      to: `/play/${roomId}`,
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      end: true,
+      dotClass: null as string | null,
+      dotLabel: null as string | null,
+    },
+    {
+      to: `/play/${roomId}/auction`,
+      label: 'Auction Room',
+      icon: Gavel,
+      end: false,
+      dotClass: null as string | null,
+      dotLabel: null as string | null,
+    },
+    {
+      to: `/play/${roomId}/accelerated`,
+      label: 'Accelerated',
+      icon: Zap,
+      end: false,
+      dotClass: accelStatus === 'selecting' ? 'bg-amber-400 animate-pulse' : null,
+      dotLabel: 'Selection open',
+    },
+    {
+      to: `/play/${roomId}/trade`,
+      label: 'Trade',
+      icon: ArrowLeftRight,
+      end: false,
+      dotClass: tradeStatus === 'open' ? 'bg-emerald-400 animate-pulse' : null,
+      dotLabel: 'Trade window open',
+    },
+    {
+      to: `/play/${roomId}/xi`,
+      label: 'Playing XI',
+      icon: Users,
+      end: false,
+      dotClass: null as string | null,
+      dotLabel: null as string | null,
+    },
   ];
 
   return (
@@ -185,7 +228,7 @@ function ThemeProvider({
           className="relative z-40 h-12 shrink-0 border-b bg-[#0E1524]"
         >
           <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between gap-3 px-4 sm:px-6">
-            {/* Left: Mark + 4 Team Nav Tabs */}
+            {/* Left: Mark + Team Nav Tabs */}
             <div className="flex items-center gap-4 min-w-0">
               <div className="hidden lg:flex items-center gap-2 shrink-0">
                 <Shield
@@ -217,6 +260,12 @@ function ThemeProvider({
                     >
                       <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                       <span>{item.label}</span>
+                      {item.dotClass && (
+                        <span
+                          aria-label={item.dotLabel ?? 'Active'}
+                          className={`h-2 w-2 shrink-0 rounded-full ${item.dotClass}`}
+                        />
+                      )}
                     </NavLink>
                   );
                 })}
@@ -264,6 +313,8 @@ export default function PlayLayout() {
 
   const [teamStatus, setTeamStatus] = useState<MyTeamStatus | null>(null);
   const [anticheatEnabled, setAnticheatEnabled] = useState<boolean>(true);
+  const [accelStatus, setAccelStatus] = useState<AccelStatus>('off');
+  const [tradeStatus, setTradeStatus] = useState<TradeStatus>('off');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -324,7 +375,7 @@ export default function PlayLayout() {
         const { data: roomRow, error: roomErr } = await withTimeout(
           supabase
             .from('rooms')
-            .select('anticheat_enabled')
+            .select('anticheat_enabled, accel_status, trade_status')
             .eq('id', roomId)
             .maybeSingle(),
           LOAD_TIMEOUT_MS,
@@ -348,6 +399,12 @@ export default function PlayLayout() {
             ? roomRow.anticheat_enabled
             : true;
         setAnticheatEnabled(enabled);
+        if (roomRow?.accel_status) {
+          setAccelStatus(roomRow.accel_status as AccelStatus);
+        }
+        if (roomRow?.trade_status) {
+          setTradeStatus(roomRow.trade_status as TradeStatus);
+        }
       }
 
       setTeamStatus(parsed);
@@ -473,7 +530,7 @@ export default function PlayLayout() {
         if (nextStatus === 'active') {
           const { data: roomRow } = await client
             .from('rooms')
-            .select('anticheat_enabled')
+            .select('anticheat_enabled, accel_status, trade_status')
             .eq('id', roomId)
             .maybeSingle();
 
@@ -481,11 +538,41 @@ export default function PlayLayout() {
           if (typeof roomRow?.anticheat_enabled === 'boolean') {
             setAnticheatEnabled(roomRow.anticheat_enabled);
           }
+          if (roomRow?.accel_status) {
+            setAccelStatus(roomRow.accel_status as AccelStatus);
+          }
+          if (roomRow?.trade_status) {
+            setTradeStatus(roomRow.trade_status as TradeStatus);
+          }
         }
       } finally {
         inFlight = false;
       }
     };
+
+    const roomChannel = client
+      .channel(`play-layout-room-${roomId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
+        (payload) => {
+          const row = payload.new as {
+            anticheat_enabled?: boolean;
+            accel_status?: AccelStatus;
+            trade_status?: TradeStatus;
+          };
+          if (typeof row?.anticheat_enabled === 'boolean') {
+            setAnticheatEnabled(row.anticheat_enabled);
+          }
+          if (row?.accel_status) {
+            setAccelStatus(row.accel_status);
+          }
+          if (row?.trade_status) {
+            setTradeStatus(row.trade_status);
+          }
+        },
+      )
+      .subscribe();
 
     const intervalId = window.setInterval(() => {
       void runHeartbeat();
@@ -501,6 +588,7 @@ export default function PlayLayout() {
       cancelled = true;
       window.clearInterval(intervalId);
       window.removeEventListener('online', handleOnline);
+      void client.removeChannel(roomChannel);
     };
   }, [roomId, teamStatus?.status, showToast]);
 
@@ -615,6 +703,8 @@ export default function PlayLayout() {
         teamId={teamStatus.team_id}
         shortCode={teamStatus.short_code}
         teamName={teamStatus.name}
+        accelStatus={accelStatus}
+        tradeStatus={tradeStatus}
       >
         <Outlet />
       </ThemeProvider>

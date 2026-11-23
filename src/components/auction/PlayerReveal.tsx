@@ -26,7 +26,14 @@ export interface PlayerRevealProps {
   variant: 'projector' | 'team';
   teamColors?: { primary: string; secondary: string };
   soundOn: boolean;
+  accelMode?: boolean;
+  accelRemaining?: number | null;
 }
+
+const MAX_INTRO_MS = 7000;
+const HOLD_EXIT_MS = 600;
+const RING_RADIUS = 42;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 function easeOutCubic(t: number): number {
   const clamped = Math.min(1, Math.max(0, t));
@@ -53,11 +60,11 @@ function usePrefersReducedMotion(): boolean {
 function animTiming(
   startFrac: number,
   endFrac: number,
-  durationMs: number,
+  introMs: number,
   anchorElapsedMs: number,
 ) {
-  const startMs = startFrac * durationMs;
-  const segDurationMs = Math.max(80, (endFrac - startFrac) * durationMs);
+  const startMs = startFrac * introMs;
+  const segDurationMs = Math.max(80, (endFrac - startFrac) * introMs);
   return {
     animationDuration: `${Math.round(segDurationMs)}ms`,
     animationDelay: `${Math.round(startMs - anchorElapsedMs)}ms`,
@@ -73,12 +80,19 @@ export function PlayerReveal({
   variant,
   teamColors,
   soundOn,
+  accelMode = false,
+  accelRemaining = null,
 }: PlayerRevealProps) {
   const reducedMotion = usePrefersReducedMotion();
   const safeDurationMs = Math.max(1000, durationMs);
   const clampedElapsed = Math.min(safeDurationMs, Math.max(0, elapsedMs));
-  const progress = clampedElapsed / safeDurationMs;
+  const totalProgress = clampedElapsed / safeDurationMs;
   const remMs = Math.max(0, safeDurationMs - clampedElapsed);
+
+  const hasHold = safeDurationMs > MAX_INTRO_MS;
+  const introMs = Math.min(safeDurationMs, MAX_INTRO_MS);
+  const introProgress = Math.min(1, clampedElapsed / introMs);
+  const isHoldState = hasHold && clampedElapsed >= introMs;
 
   const isProjector = variant === 'projector';
   const accentPrimary = teamColors?.primary ?? '#F5B921';
@@ -97,6 +111,10 @@ export function PlayerReveal({
     anchorRef.current = { key: lotKey, elapsed: clampedElapsed };
   }
   const anchorElapsed = anchorRef.current.elapsed;
+
+  // If user joined/refreshed after introMs completed, render HOLD immediately without replaying intro animations.
+  const joinedInHold = hasHold && anchorElapsed >= introMs;
+  const runIntroAnim = !reducedMotion && !joinedInHold;
 
   // Audio stage triggers — fire forward only, never replay missed stages on mid-reveal join.
   const audioStageRef = useRef<{
@@ -121,58 +139,75 @@ export function PlayerReveal({
 
   useEffect(() => {
     const id = lot?.id ?? 'none';
+    const tickWindowMs = hasHold ? 5000 : 3000;
+    const tickMaxSec = hasHold ? 5 : 3;
+
     if (audioStageRef.current.lotId !== id) {
       audioStageRef.current = {
         lotId: id,
-        whoosh: progress > 0.14,
-        stat1: progress > 0.42,
-        stat2: progress > 0.48,
-        stat3: progress > 0.54,
-        slam: progress > 0.76,
-        lastCountdownSec: remMs <= 3000 ? Math.ceil(remMs / 1000) : null,
-        horn: progress > 0.98,
+        whoosh: introProgress > 0.14,
+        stat1: introProgress > 0.42,
+        stat2: introProgress > 0.48,
+        stat3: introProgress > 0.54,
+        slam: introProgress > 0.76,
+        lastCountdownSec:
+          remMs <= tickWindowMs
+            ? Math.min(tickMaxSec, Math.max(1, Math.ceil(remMs / 1000)))
+            : null,
+        horn: hasHold ? remMs <= 250 : totalProgress > 0.98,
       };
     }
 
     if (!soundOn || !lot?.players) return;
 
     const st = audioStageRef.current;
-    if (!st.whoosh && progress >= 0.08) {
+    if (!st.whoosh && introProgress >= 0.08) {
       st.whoosh = true;
       playRevealWhoosh();
     }
-    if (!st.stat1 && progress >= 0.38) {
+    if (!st.stat1 && introProgress >= 0.38) {
       st.stat1 = true;
       playRevealStatTick();
     }
-    if (!st.stat2 && progress >= 0.44) {
+    if (!st.stat2 && introProgress >= 0.44) {
       st.stat2 = true;
       playRevealStatTick();
     }
-    if (!st.stat3 && progress >= 0.5) {
+    if (!st.stat3 && introProgress >= 0.5) {
       st.stat3 = true;
       playRevealStatTick();
     }
-    if (!st.slam && progress >= 0.7) {
+    if (!st.slam && introProgress >= 0.7) {
       st.slam = true;
       playRevealBasePriceSlam();
     }
-    if (remMs > 0 && remMs <= 3000) {
-      const sec = Math.min(3, Math.max(1, Math.ceil(remMs / 1000)));
+    if (remMs > 0 && remMs <= tickWindowMs) {
+      const sec = Math.min(tickMaxSec, Math.max(1, Math.ceil(remMs / 1000)));
       if (st.lastCountdownSec !== sec) {
         st.lastCountdownSec = sec;
         playRevealCountdownTick();
       }
     }
-    if (!st.horn && progress >= 0.96) {
+    if (
+      !st.horn &&
+      (hasHold ? remMs <= 250 : totalProgress >= 0.96)
+    ) {
       st.horn = true;
       playRevealOpenHorn();
     }
-  }, [lot?.id, lot?.players, progress, remMs, soundOn]);
+  }, [
+    lot?.id,
+    lot?.players,
+    introProgress,
+    totalProgress,
+    remMs,
+    hasHold,
+    soundOn,
+  ]);
 
   const player = lot?.players ?? null;
 
-  // Staggered stat rows across 0.38 -> 0.75 (declared before early return to satisfy Rules of Hooks)
+  // Staggered stat rows across 0.38 -> 0.75 of introMs (declared before early return to satisfy Rules of Hooks)
   const statRows = useMemo(() => {
     const srVal =
       player?.strike_rate && player.strike_rate > 0 ? player.strike_rate : 0;
@@ -266,17 +301,18 @@ export function PlayerReveal({
     setProgress?.setLabel || setCategoryInfo?.label || player.category || 'POOL';
   const setNumberText = setProgress?.setNo ?? lot.set_no;
 
-  // Letter-by-letter name reveal across 0.24 -> 0.44
+  // Letter-by-letter name reveal across 0.24 -> 0.44 of introMs (immediate when joinedInHold or reducedMotion)
   const fullFirst = player.first_name || '';
   const fullLast = player.last_name || '';
   const totalNameChars = fullFirst.length + fullLast.length;
-  const nameRevealFrac = reducedMotion
+  const immediateFinal = reducedMotion || joinedInHold || isHoldState;
+  const nameRevealFrac = immediateFinal
     ? 1
-    : progress < 0.24
+    : introProgress < 0.24
       ? 0
-      : Math.min(1, (progress - 0.24) / 0.2);
+      : Math.min(1, (introProgress - 0.24) / 0.2);
   const visibleChars = Math.max(
-    reducedMotion ? totalNameChars : 0,
+    immediateFinal ? totalNameChars : 0,
     Math.ceil(nameRevealFrac * totalNameChars),
   );
   const visibleFirstCount = Math.min(fullFirst.length, visibleChars);
@@ -285,29 +321,73 @@ export function PlayerReveal({
     Math.min(fullLast.length, visibleChars - fullFirst.length),
   );
 
-  const countdownSec =
+  // Countdown & Hold State calculations
+  const remainingSecCeil = Math.max(1, Math.ceil(remMs / 1000));
+  const isLastFiveSec = hasHold && remMs <= 5000;
+  const showShortClosingCountdown =
+    !hasHold && (remMs <= 3000 || introProgress >= 0.8);
+  const shortCountdownSec =
     remMs > 0 ? Math.min(3, Math.max(1, Math.ceil(remMs / 1000))) : 0;
-  const showClosingCountdown = remMs <= 3000 || progress >= 0.8;
-  const isFinalMoment = progress >= 0.84;
 
-  const remainingRatio = Math.max(0, Math.min(1, 1 - progress));
+  const holdDurationMs = Math.max(1, safeDurationMs - introMs);
+  const ringRemainingRatio = hasHold
+    ? isHoldState
+      ? Math.max(0, Math.min(1, remMs / holdDurationMs))
+      : 1
+    : 0;
+  const ringDashOffset = RING_CIRCUMFERENCE * (1 - ringRemainingRatio);
+
+  const remainingRatio = Math.max(0, Math.min(1, 1 - totalProgress));
+
+  // Root container animation (backdrop fade-in + exit slide away)
+  const containerAnimationStyle = (() => {
+    if (reducedMotion) {
+      if (joinedInHold) return undefined;
+      return {
+        animationName: 'reveal-backdrop-in',
+        animationDuration: `${Math.round(introMs * 0.12)}ms`,
+        animationDelay: `${Math.round(-anchorElapsed)}ms`,
+        animationFillMode: 'both' as const,
+      };
+    }
+
+    if (hasHold) {
+      const exitStartMs = Math.max(introMs, safeDurationMs - HOLD_EXIT_MS);
+      if (joinedInHold) {
+        return {
+          animationName: 'reveal-exit-up',
+          animationDuration: `${HOLD_EXIT_MS}ms`,
+          animationDelay: `${Math.round(exitStartMs - anchorElapsed)}ms`,
+          animationFillMode: 'forwards' as const,
+        };
+      }
+      return {
+        animationName: 'reveal-backdrop-in, reveal-exit-up',
+        animationDuration: `${Math.round(introMs * 0.12)}ms, ${HOLD_EXIT_MS}ms`,
+        animationDelay: `${Math.round(-anchorElapsed)}ms, ${Math.round(
+          exitStartMs - anchorElapsed,
+        )}ms`,
+        animationFillMode: 'both, forwards',
+      };
+    }
+
+    return {
+      animationName: 'reveal-backdrop-in, reveal-exit-up',
+      animationDuration: `${Math.round(safeDurationMs * 0.12)}ms, ${Math.round(
+        safeDurationMs * 0.06,
+      )}ms`,
+      animationDelay: `${Math.round(-anchorElapsed)}ms, ${Math.round(
+        safeDurationMs * 0.95 - anchorElapsed,
+      )}ms`,
+      animationFillMode: 'both, forwards',
+    };
+  })();
+
+  const holdRingStroke = isLastFiveSec ? '#F59E0B' : '#22D3EE';
 
   return (
     <div
-      style={
-        reducedMotion
-          ? undefined
-          : {
-              animationName: 'reveal-backdrop-in, reveal-exit-up',
-              animationDuration: `${Math.round(safeDurationMs * 0.12)}ms, ${Math.round(
-                safeDurationMs * 0.06,
-              )}ms`,
-              animationDelay: `${Math.round(-anchorElapsed)}ms, ${Math.round(
-                safeDurationMs * 0.95 - anchorElapsed,
-              )}ms`,
-              animationFillMode: 'both, forwards',
-            }
-      }
+      style={containerAnimationStyle}
       className={`relative flex w-full flex-col justify-between overflow-hidden bg-[#070B14]/95 broadcast-grid select-none ${
         isProjector
           ? 'h-full px-12 pt-6 pb-4'
@@ -321,25 +401,25 @@ export function PlayerReveal({
           background:
             'radial-gradient(ellipse 58% 65% at 50% 0%, rgba(245, 185, 33, 0.22) 0%, rgba(34, 211, 238, 0.06) 45%, transparent 78%)',
           transformOrigin: 'top center',
-          ...(reducedMotion
-            ? {}
-            : {
+          ...(runIntroAnim
+            ? {
                 animationName: 'reveal-spotlight-in',
-                ...animTiming(0, 0.14, safeDurationMs, anchorElapsed),
-              }),
+                ...animTiming(0, 0.14, introMs, anchorElapsed),
+              }
+            : {}),
         }}
         className="pointer-events-none absolute inset-x-0 top-0 h-[78%]"
       />
 
-      {/* STAGE 1 HEADER: NEXT UP / SET / LOT POSITION / PLAYER CODE */}
+      {/* STAGE 1 HEADER: NEXT UP / SET / REMAINING / PLAYER CODE */}
       <div
         style={
-          reducedMotion
-            ? undefined
-            : {
+          runIntroAnim
+            ? {
                 animationName: 'reveal-slide-down',
-                ...animTiming(0, 0.12, safeDurationMs, anchorElapsed),
+                ...animTiming(0, 0.12, introMs, anchorElapsed),
               }
+            : undefined
         }
         className={`relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 ${
           isProjector ? 'pb-4' : 'pb-3'
@@ -354,22 +434,44 @@ export function PlayerReveal({
             NEXT UP
           </span>
 
-          <span
-            className={`rounded-[2px] border border-[#22D3EE]/50 bg-[#0E1524] font-mono font-bold uppercase tracking-[0.14em] text-[#22D3EE] ${
-              isProjector ? 'px-4 py-1.5 text-xl' : 'px-2.5 py-1 text-[11px]'
-            }`}
-          >
-            SET {setNumberText} - {setLabelText.toUpperCase()}
-          </span>
-
-          {setProgress && (
+          {accelMode ? (
             <span
-              className={`rounded-[2px] border border-white/15 bg-[#0E1524] font-mono uppercase tracking-[0.12em] text-[#E8ECF4] tabular-nums ${
+              className={`rounded-[2px] border border-red-500/60 bg-red-500/15 font-mono font-bold uppercase tracking-[0.14em] text-red-300 ${
                 isProjector ? 'px-4 py-1.5 text-xl' : 'px-2.5 py-1 text-[11px]'
               }`}
             >
-              {setProgress.remaining} LEFT IN SET
+              ACCELERATED ROUND
             </span>
+          ) : (
+            <span
+              className={`rounded-[2px] border border-[#22D3EE]/50 bg-[#0E1524] font-mono font-bold uppercase tracking-[0.14em] text-[#22D3EE] ${
+                isProjector ? 'px-4 py-1.5 text-xl' : 'px-2.5 py-1 text-[11px]'
+              }`}
+            >
+              SET {setNumberText} - {setLabelText.toUpperCase()}
+            </span>
+          )}
+
+          {accelMode ? (
+            accelRemaining !== null && (
+              <span
+                className={`rounded-[2px] border border-white/15 bg-[#0E1524] font-mono uppercase tracking-[0.12em] text-[#E8ECF4] tabular-nums ${
+                  isProjector ? 'px-4 py-1.5 text-xl' : 'px-2.5 py-1 text-[11px]'
+                }`}
+              >
+                {accelRemaining} LEFT
+              </span>
+            )
+          ) : (
+            setProgress && (
+              <span
+                className={`rounded-[2px] border border-white/15 bg-[#0E1524] font-mono uppercase tracking-[0.12em] text-[#E8ECF4] tabular-nums ${
+                  isProjector ? 'px-4 py-1.5 text-xl' : 'px-2.5 py-1 text-[11px]'
+                }`}
+              >
+                {setProgress.remaining} LEFT IN SET
+              </span>
+            )
           )}
         </div>
 
@@ -389,12 +491,12 @@ export function PlayerReveal({
       {/* MAIN REVEAL STAGE */}
       <div
         style={
-          reducedMotion
-            ? undefined
-            : {
+          runIntroAnim
+            ? {
                 animationName: 'reveal-micro-shake',
-                ...animTiming(0.75, 0.84, safeDurationMs, anchorElapsed),
+                ...animTiming(0.75, 0.84, introMs, anchorElapsed),
               }
+            : undefined
         }
         className={`relative z-10 my-auto grid items-center ${
           isProjector
@@ -402,7 +504,7 @@ export function PlayerReveal({
             : 'grid-cols-1 gap-5 py-4 md:grid-cols-12 md:gap-6'
         }`}
       >
-        {/* LEFT: 3D FLIPPING CARD STAGE (STAGE 2: 0.08 -> 0.30) */}
+        {/* LEFT: 3D FLIPPING CARD STAGE */}
         <div
           className={`relative flex items-center justify-center ${
             isProjector ? 'col-span-5' : 'md:col-span-5'
@@ -414,12 +516,13 @@ export function PlayerReveal({
             style={{
               background:
                 'radial-gradient(circle at center, rgba(245, 185, 33, 0.45) 0%, rgba(34, 211, 238, 0.16) 45%, transparent 72%)',
-              ...(reducedMotion
-                ? {}
-                : {
+              opacity: joinedInHold || reducedMotion ? 0.32 : undefined,
+              ...(runIntroAnim
+                ? {
                     animationName: 'reveal-glow-burst',
-                    ...animTiming(0.2, 0.42, safeDurationMs, anchorElapsed),
-                  }),
+                    ...animTiming(0.2, 0.42, introMs, anchorElapsed),
+                  }
+                : {}),
             }}
             className={`pointer-events-none absolute rounded-full ${
               isProjector ? 'h-[580px] w-[580px]' : 'h-[320px] w-[320px]'
@@ -429,12 +532,12 @@ export function PlayerReveal({
           {/* Arrival + Gentle Bob Wrapper */}
           <div
             style={
-              reducedMotion
-                ? undefined
-                : {
+              runIntroAnim
+                ? {
                     animationName: 'reveal-card-arrive',
-                    ...animTiming(0.08, 0.22, safeDurationMs, anchorElapsed),
+                    ...animTiming(0.08, 0.22, introMs, anchorElapsed),
                   }
+                : undefined
             }
             className="relative"
           >
@@ -445,9 +548,9 @@ export function PlayerReveal({
                   : {
                       animationName: 'reveal-card-bob',
                       animationDuration: '3.2s',
-                      animationDelay: `${Math.round(
-                        safeDurationMs * 0.3 - anchorElapsed,
-                      )}ms`,
+                      animationDelay: joinedInHold
+                        ? '0ms'
+                        : `${Math.round(introMs * 0.3 - anchorElapsed)}ms`,
                       animationTimingFunction: 'ease-in-out',
                       animationIterationCount: 'infinite',
                     }
@@ -462,64 +565,63 @@ export function PlayerReveal({
                 }`}
               >
                 {/* CARD BACK FACE ("IPL | SUPERTEAM" navy & gold) */}
-                <div
-                  style={
-                    reducedMotion
-                      ? undefined
-                      : {
-                          animationName: 'reveal-card-flip-back',
-                          ...animTiming(0.14, 0.3, safeDurationMs, anchorElapsed),
-                          animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-                        }
-                  }
-                  className="reveal-backface-hidden reveal-motion-flip-back absolute inset-0 overflow-hidden rounded-[6px] border-2 border-[#F5B921] bg-[#0E1524] reveal-diag-pattern p-5 shadow-[0_24px_60px_rgba(0,0,0,0.85)]"
-                >
-                  <CornerBrackets tone="gold" size="md" />
-                  <div className="flex h-full w-full flex-col items-center justify-between border border-[#F5B921]/35 bg-[#070B14]/85 p-5 text-center">
-                    <span className="font-mono text-xs uppercase tracking-[0.22em] text-[#22D3EE]">
-                      OFFICIAL PLAYER LOT
-                    </span>
+                {runIntroAnim && (
+                  <div
+                    style={{
+                      animationName: 'reveal-card-flip-back',
+                      ...animTiming(0.14, 0.3, introMs, anchorElapsed),
+                      animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                    }}
+                    className="reveal-backface-hidden reveal-motion-flip-back absolute inset-0 overflow-hidden rounded-[6px] border-2 border-[#F5B921] bg-[#0E1524] reveal-diag-pattern p-5 shadow-[0_24px_60px_rgba(0,0,0,0.85)]"
+                  >
+                    <CornerBrackets tone="gold" size="md" />
+                    <div className="flex h-full w-full flex-col items-center justify-between border border-[#F5B921]/35 bg-[#070B14]/85 p-5 text-center">
+                      <span className="font-mono text-xs uppercase tracking-[0.22em] text-[#22D3EE]">
+                        OFFICIAL PLAYER LOT
+                      </span>
 
-                    <div className="flex flex-col items-center gap-3">
-                      <div
-                        className={`flex items-center justify-center rounded-[4px] border-2 border-[#F5B921] bg-[#0E1524] ${
-                          isProjector ? 'h-28 w-28' : 'h-16 w-16'
-                        }`}
-                      >
-                        <Shield
-                          className={`text-[#F5B921] ${
-                            isProjector ? 'h-14 w-14' : 'h-8 w-8'
+                      <div className="flex flex-col items-center gap-3">
+                        <div
+                          className={`flex items-center justify-center rounded-[4px] border-2 border-[#F5B921] bg-[#0E1524] ${
+                            isProjector ? 'h-28 w-28' : 'h-16 w-16'
                           }`}
-                        />
+                        >
+                          <Shield
+                            className={`text-[#F5B921] ${
+                              isProjector ? 'h-14 w-14' : 'h-8 w-8'
+                            }`}
+                          />
+                        </div>
+                        <p
+                          className={`font-display leading-none tracking-[0.12em] text-[#E8ECF4] ${
+                            isProjector ? 'text-5xl' : 'text-3xl'
+                          }`}
+                        >
+                          IPL <span className="text-[#F5B921]">|</span> SUPERTEAM
+                        </p>
+                        <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#8B95AA]">
+                          AUCTION SEASON
+                        </p>
                       </div>
-                      <p
-                        className={`font-display leading-none tracking-[0.12em] text-[#E8ECF4] ${
-                          isProjector ? 'text-5xl' : 'text-3xl'
-                        }`}
-                      >
-                        IPL <span className="text-[#F5B921]">|</span> SUPERTEAM
-                      </p>
-                      <p className="font-mono text-xs uppercase tracking-[0.2em] text-[#8B95AA]">
-                        AUCTION SEASON
-                      </p>
-                    </div>
 
-                    <span className="font-mono text-xs uppercase tracking-[0.18em] text-[#F5B921]">
-                      {player.player_code}
-                    </span>
+                      <span className="font-mono text-xs uppercase tracking-[0.18em] text-[#F5B921]">
+                        {player.player_code}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* CARD FRONT FACE */}
                 <div
                   style={
-                    reducedMotion
-                      ? undefined
-                      : {
+                    runIntroAnim
+                      ? {
                           animationName: 'reveal-card-flip-front',
-                          ...animTiming(0.14, 0.3, safeDurationMs, anchorElapsed),
-                          animationTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                          ...animTiming(0.14, 0.3, introMs, anchorElapsed),
+                          animationTimingFunction:
+                            'cubic-bezier(0.22, 1, 0.36, 1)',
                         }
+                      : undefined
                   }
                   className="reveal-backface-hidden reveal-motion-flip-front relative h-full w-full overflow-hidden rounded-[6px] shadow-[0_24px_64px_rgba(0,0,0,0.85)]"
                 >
@@ -531,14 +633,14 @@ export function PlayerReveal({
                   />
 
                   {/* Diagonal Specular Shine Sweep */}
-                  {!reducedMotion && (
+                  {runIntroAnim && (
                     <div
                       aria-hidden="true"
                       style={{
                         background:
                           'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.34) 50%, transparent 100%)',
                         animationName: 'reveal-card-shine',
-                        ...animTiming(0.26, 0.42, safeDurationMs, anchorElapsed),
+                        ...animTiming(0.26, 0.42, introMs, anchorElapsed),
                       }}
                       className="reveal-motion-shine pointer-events-none absolute inset-y-0 left-0 w-1/2"
                     />
@@ -549,24 +651,24 @@ export function PlayerReveal({
           </div>
         </div>
 
-        {/* RIGHT: NAME, CHIPS, STAGGERED STATS, BASE PRICE SLAM, COUNTDOWN */}
+        {/* RIGHT: NAME, CHIPS, STAGGERED STATS, BASE PRICE SLAM, HOLD / COUNTDOWN */}
         <div
           className={`flex min-w-0 flex-col justify-between ${
             isProjector ? 'col-span-7 gap-5' : 'md:col-span-7 gap-3.5'
           }`}
         >
-          {/* STAGE 3 (0.24 -> 0.50): LETTER-BY-LETTER NAME + CHIPS */}
+          {/* LETTER-BY-LETTER NAME + CHIPS */}
           <div className={isProjector ? 'space-y-4' : 'space-y-2.5'}>
             <div className="flex flex-wrap items-center gap-2">
               {categoryInfo && (
                 <span
                   style={
-                    reducedMotion
-                      ? undefined
-                      : {
+                    runIntroAnim
+                      ? {
                           animationName: 'reveal-fade-up',
-                          ...animTiming(0.28, 0.38, safeDurationMs, anchorElapsed),
+                          ...animTiming(0.28, 0.38, introMs, anchorElapsed),
                         }
+                      : undefined
                   }
                   className={`inline-flex items-center rounded-[2px] border font-mono uppercase tracking-[0.1em] ${
                     categoryInfo.chipClass
@@ -579,12 +681,12 @@ export function PlayerReveal({
               {skillInfo && (
                 <span
                   style={
-                    reducedMotion
-                      ? undefined
-                      : {
+                    runIntroAnim
+                      ? {
                           animationName: 'reveal-fade-up',
-                          ...animTiming(0.32, 0.42, safeDurationMs, anchorElapsed),
+                          ...animTiming(0.32, 0.42, introMs, anchorElapsed),
                         }
+                      : undefined
                   }
                   className={`inline-flex items-center rounded-[2px] border font-mono font-semibold uppercase tracking-[0.1em] ${
                     skillInfo.chipClass
@@ -596,12 +698,12 @@ export function PlayerReveal({
 
               <span
                 style={
-                  reducedMotion
-                    ? undefined
-                    : {
+                  runIntroAnim
+                    ? {
                         animationName: 'reveal-fade-up',
-                        ...animTiming(0.36, 0.46, safeDurationMs, anchorElapsed),
+                        ...animTiming(0.36, 0.46, introMs, anchorElapsed),
                       }
+                    : undefined
                 }
                 className={`inline-flex items-center rounded-[2px] border border-white/15 bg-[#0E1524] font-mono uppercase tracking-[0.1em] text-[#E8ECF4] ${
                   isProjector ? 'px-3.5 py-1 text-xl' : 'px-2 py-0.5 text-[11px]'
@@ -613,12 +715,12 @@ export function PlayerReveal({
               {player.is_overseas ? (
                 <span
                   style={
-                    reducedMotion
-                      ? undefined
-                      : {
+                    runIntroAnim
+                      ? {
                           animationName: 'reveal-fade-up',
-                          ...animTiming(0.4, 0.5, safeDurationMs, anchorElapsed),
+                          ...animTiming(0.4, 0.5, introMs, anchorElapsed),
                         }
+                      : undefined
                   }
                   className={`inline-flex items-center gap-1.5 rounded-[2px] border border-[#F5B921]/50 bg-[#F5B921]/15 font-mono font-bold uppercase tracking-[0.1em] text-[#F5B921] ${
                     isProjector ? 'px-3.5 py-1 text-xl' : 'px-2 py-0.5 text-[11px]'
@@ -630,12 +732,12 @@ export function PlayerReveal({
               ) : (
                 <span
                   style={
-                    reducedMotion
-                      ? undefined
-                      : {
+                    runIntroAnim
+                      ? {
                           animationName: 'reveal-fade-up',
-                          ...animTiming(0.4, 0.5, safeDurationMs, anchorElapsed),
+                          ...animTiming(0.4, 0.5, introMs, anchorElapsed),
                         }
+                      : undefined
                   }
                   className={`inline-flex items-center rounded-[2px] border border-[#22D3EE]/35 bg-[#22D3EE]/10 font-mono font-semibold uppercase tracking-[0.1em] text-[#22D3EE] ${
                     isProjector ? 'px-3.5 py-1 text-xl' : 'px-2 py-0.5 text-[11px]'
@@ -686,12 +788,12 @@ export function PlayerReveal({
             {(player.ipl_season || player.ipl_team) && (
               <div
                 style={
-                  reducedMotion
-                    ? undefined
-                    : {
+                  runIntroAnim
+                    ? {
                         animationName: 'reveal-fade-up',
-                        ...animTiming(0.42, 0.52, safeDurationMs, anchorElapsed),
+                        ...animTiming(0.42, 0.52, introMs, anchorElapsed),
                       }
+                    : undefined
                 }
                 className={`flex flex-wrap items-center gap-2 font-mono uppercase tracking-[0.1em] text-[#8B95AA] ${
                   isProjector ? 'text-xl' : 'text-xs'
@@ -711,7 +813,7 @@ export function PlayerReveal({
             )}
           </div>
 
-          {/* STAGE 4 (0.38 -> 0.75): STAGGERED STAT BARS WITH EASE-OUT COUNT-UP */}
+          {/* STAGGERED STAT BARS WITH EASE-OUT COUNT-UP */}
           <div
             className={`relative rounded-[4px] border border-white/15 bg-[#0E1524] ${
               isProjector ? 'p-6 space-y-3.5' : 'p-3.5 space-y-2'
@@ -721,11 +823,12 @@ export function PlayerReveal({
 
             {statRows.map((row) => {
               const rowDurFrac = 0.14;
-              const rawT = reducedMotion
+              const rawT = immediateFinal
                 ? 1
-                : (progress - row.startFrac) / rowDurFrac;
+                : (introProgress - row.startFrac) / rowDurFrac;
               const eased = easeOutCubic(rawT);
-              const isRowVisible = reducedMotion || progress >= row.startFrac;
+              const isRowVisible =
+                immediateFinal || introProgress >= row.startFrac;
 
               const currentVal = row.target * eased;
               const displayText =
@@ -744,17 +847,17 @@ export function PlayerReveal({
                 <div
                   key={row.key}
                   style={
-                    reducedMotion
-                      ? undefined
-                      : {
+                    runIntroAnim
+                      ? {
                           animationName: 'reveal-fade-up',
                           ...animTiming(
                             row.startFrac,
                             row.startFrac + 0.08,
-                            safeDurationMs,
+                            introMs,
                             anchorElapsed,
                           ),
                         }
+                      : undefined
                   }
                   className={isRowVisible ? 'opacity-100' : 'opacity-0'}
                 >
@@ -796,7 +899,7 @@ export function PlayerReveal({
             })}
           </div>
 
-          {/* STAGE 5 & 6 (0.70 -> 1.00): BASE PRICE SLAM + BIDDING OPENS IN 3, 2, 1 */}
+          {/* BASE PRICE SLAM + BIDDING OPENS IN COUNTDOWN / HOLD RING */}
           <div
             className={`grid items-stretch gap-4 ${
               isProjector ? 'grid-cols-12' : 'grid-cols-1 sm:grid-cols-12'
@@ -805,12 +908,12 @@ export function PlayerReveal({
             {/* Base Price Slam */}
             <div
               style={
-                reducedMotion
-                  ? undefined
-                  : {
+                runIntroAnim
+                  ? {
                       animationName: 'reveal-base-slam',
-                      ...animTiming(0.7, 0.84, safeDurationMs, anchorElapsed),
+                      ...animTiming(0.7, 0.84, introMs, anchorElapsed),
                     }
+                  : undefined
               }
               className={`relative flex items-center justify-between rounded-[4px] border-2 border-[#F5B921] bg-[#0E1524] ${
                 isProjector
@@ -819,12 +922,12 @@ export function PlayerReveal({
               }`}
             >
               {/* Gold Ring Pulse on slam */}
-              {!reducedMotion && (
+              {runIntroAnim && (
                 <div
                   aria-hidden="true"
                   style={{
                     animationName: 'reveal-ring-pulse',
-                    ...animTiming(0.74, 0.9, safeDurationMs, anchorElapsed),
+                    ...animTiming(0.74, 0.9, introMs, anchorElapsed),
                   }}
                   className="reveal-motion-ring pointer-events-none absolute inset-0 rounded-[4px] border-2 border-[#F5B921]"
                 />
@@ -848,55 +951,134 @@ export function PlayerReveal({
               </div>
             </div>
 
-            {/* Stage 6 Countdown: BIDDING OPENS IN 3, 2, 1 */}
-            <div
-              style={{
-                borderColor: showClosingCountdown
-                  ? accentPrimary
-                  : 'rgba(255,255,255,0.12)',
-              }}
-              className={`flex items-center justify-between gap-3 rounded-[4px] border bg-[#0E1524] transition-colors ${
-                isProjector
-                  ? 'col-span-5 px-6 py-4'
-                  : 'sm:col-span-5 px-4 py-2.5'
-              } ${isFinalMoment ? 'bg-[#141C2F]' : ''}`}
-            >
-              <div className="min-w-0">
-                <p
-                  className={`font-mono uppercase tracking-[0.12em] ${
-                    showClosingCountdown ? 'text-[#22D3EE]' : 'text-[#8B95AA]'
-                  } ${isProjector ? 'text-lg' : 'text-[10px]'}`}
-                >
-                  {showClosingCountdown ? 'BIDDING OPENS IN' : 'PREVIEW'}
-                </p>
-                <p
-                  className={`font-display leading-none text-[#E8ECF4] tabular-nums ${
-                    isProjector ? 'mt-1 text-5xl' : 'mt-0.5 text-2xl'
+            {/* Countdown / Hold Ring Box */}
+            {hasHold ? (
+              <div
+                style={{
+                  borderColor: isLastFiveSec
+                    ? '#F59E0B'
+                    : isHoldState
+                      ? '#22D3EE'
+                      : accentPrimary,
+                }}
+                className={`flex items-center justify-between gap-3 rounded-[4px] border-2 bg-[#0E1524] transition-colors ${
+                  isProjector
+                    ? 'col-span-5 px-6 py-4'
+                    : 'sm:col-span-5 px-4 py-2.5'
+                } ${isLastFiveSec ? 'bg-[#141C2F]' : ''}`}
+              >
+                <div className="min-w-0">
+                  <p
+                    className={`font-mono font-semibold uppercase tracking-[0.12em] ${
+                      isLastFiveSec
+                        ? 'text-amber-400'
+                        : 'text-[#22D3EE]'
+                    } ${isProjector ? 'text-base' : 'text-[10px]'}`}
+                  >
+                    BIDDING OPENS IN
+                  </p>
+                  <p
+                    className={`font-mono font-bold leading-none tabular-nums ${
+                      isLastFiveSec ? 'text-amber-300' : 'text-[#E8ECF4]'
+                    } ${isProjector ? 'mt-1.5 text-5xl' : 'mt-1 text-2xl sm:text-3xl'}`}
+                  >
+                    {remainingSecCeil}s
+                  </p>
+                </div>
+
+                {/* Draining SVG Ring */}
+                <div
+                  className={`relative flex shrink-0 items-center justify-center ${
+                    isProjector ? 'h-20 w-20' : 'h-12 w-12'
                   }`}
                 >
-                  {showClosingCountdown
-                    ? countdownSec > 0
-                      ? countdownSec
-                      : 'GO'
-                    : `${Math.max(1, Math.ceil(remMs / 1000))}S`}
-                </p>
+                  <svg
+                    viewBox="0 0 100 100"
+                    className="h-full w-full -rotate-90"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r={RING_RADIUS}
+                      fill="none"
+                      stroke="rgba(255,255,255,0.1)"
+                      strokeWidth="7"
+                    />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r={RING_RADIUS}
+                      fill="none"
+                      stroke={holdRingStroke}
+                      strokeWidth="7"
+                      strokeDasharray={RING_CIRCUMFERENCE}
+                      strokeDashoffset={ringDashOffset}
+                      strokeLinecap="butt"
+                      className="transition-[stroke-dashoffset,stroke] duration-100 ease-linear motion-reduce:transition-none"
+                    />
+                  </svg>
+                  <span
+                    className={`absolute font-mono font-bold tabular-nums ${
+                      isLastFiveSec ? 'text-amber-300' : 'text-[#22D3EE]'
+                    } ${isProjector ? 'text-2xl' : 'text-sm'}`}
+                  >
+                    {remainingSecCeil}
+                  </span>
+                </div>
               </div>
-
+            ) : (
               <div
-                className={`relative flex shrink-0 items-center justify-center rounded-full border-2 font-display tabular-nums ${
-                  showClosingCountdown
-                    ? 'border-[#22D3EE] text-[#22D3EE]'
-                    : 'border-white/20 text-[#8B95AA]'
-                } ${isProjector ? 'h-16 w-16 text-4xl' : 'h-10 w-10 text-xl'}`}
+                style={{
+                  borderColor: showShortClosingCountdown
+                    ? accentPrimary
+                    : 'rgba(255,255,255,0.12)',
+                }}
+                className={`flex items-center justify-between gap-3 rounded-[4px] border bg-[#0E1524] transition-colors ${
+                  isProjector
+                    ? 'col-span-5 px-6 py-4'
+                    : 'sm:col-span-5 px-4 py-2.5'
+                } ${introProgress >= 0.84 ? 'bg-[#141C2F]' : ''}`}
               >
-                {Math.max(1, Math.ceil(remMs / 1000))}
+                <div className="min-w-0">
+                  <p
+                    className={`font-mono uppercase tracking-[0.12em] ${
+                      showShortClosingCountdown
+                        ? 'text-[#22D3EE]'
+                        : 'text-[#8B95AA]'
+                    } ${isProjector ? 'text-lg' : 'text-[10px]'}`}
+                  >
+                    {showShortClosingCountdown ? 'BIDDING OPENS IN' : 'PREVIEW'}
+                  </p>
+                  <p
+                    className={`font-display leading-none text-[#E8ECF4] tabular-nums ${
+                      isProjector ? 'mt-1 text-5xl' : 'mt-0.5 text-2xl'
+                    }`}
+                  >
+                    {showShortClosingCountdown
+                      ? shortCountdownSec > 0
+                        ? shortCountdownSec
+                        : 'GO'
+                      : `${remainingSecCeil}S`}
+                  </p>
+                </div>
+
+                <div
+                  className={`relative flex shrink-0 items-center justify-center rounded-full border-2 font-display tabular-nums ${
+                    showShortClosingCountdown
+                      ? 'border-[#22D3EE] text-[#22D3EE]'
+                      : 'border-white/20 text-[#8B95AA]'
+                  } ${isProjector ? 'h-16 w-16 text-4xl' : 'h-10 w-10 text-xl'}`}
+                >
+                  {remainingSecCeil}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* BOTTOM GOLD PROGRESS BAR (scaleX only — zero layout shift) */}
+      {/* BOTTOM PROGRESS BAR (scaleX only — zero layout shift) */}
       <div className="relative z-10 mt-1">
         <div
           className={`w-full overflow-hidden rounded-[2px] bg-[#0E1524] border border-white/10 ${
@@ -908,7 +1090,9 @@ export function PlayerReveal({
               transform: `scaleX(${remainingRatio})`,
               transformOrigin: 'left center',
             }}
-            className="h-full w-full bg-[#F5B921] transition-transform duration-100 ease-linear motion-reduce:transition-none"
+            className={`h-full w-full transition-transform duration-100 ease-linear motion-reduce:transition-none ${
+              isLastFiveSec ? 'bg-amber-400' : 'bg-[#F5B921]'
+            }`}
           />
         </div>
       </div>

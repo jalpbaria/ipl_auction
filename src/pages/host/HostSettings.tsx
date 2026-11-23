@@ -348,7 +348,7 @@ export default function HostSettings() {
           <div className="max-w-md space-y-2">
             <PreviewLengthControl
               roomId={room.id}
-              currentSeconds={room.preview_seconds ?? 5}
+              currentSeconds={room.preview_seconds ?? 30}
               onUpdated={refreshRoom}
             />
             <p className="text-[11px] text-[#8B95AA]">

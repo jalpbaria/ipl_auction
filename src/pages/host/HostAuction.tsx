@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Clock,
   Gavel,
@@ -14,9 +15,10 @@ import {
   Unlock,
   Undo2,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Countdown } from '../../components/auction/Countdown';
 import { PlayerCard } from '../../components/auction/PlayerCard';
 import { ConfirmModal } from '../../components/host/ConfirmModal';
@@ -59,6 +61,16 @@ function formatBidTime(iso: string): string {
   });
 }
 
+function formatAccelCountdown(endsAt: string | null, serverNowMs: number): string {
+  if (!endsAt) return '00:00';
+  const target = Date.parse(endsAt);
+  if (Number.isNaN(target)) return '00:00';
+  const sec = Math.max(0, Math.ceil((target - serverNowMs) / 1000));
+  const mins = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  return `${String(mins).padStart(2, '0')}:${String(remSec).padStart(2, '0')}`;
+}
+
 function KeyCap({ children }: { children: React.ReactNode }) {
   return (
     <kbd className="hidden xl:inline-flex items-center justify-center rounded-[2px] border border-current/30 bg-black/25 px-1.5 py-0.5 font-mono text-[10px] leading-none uppercase tracking-wider opacity-80">
@@ -83,10 +95,21 @@ export default function HostAuction() {
     offsetMs,
     reveal,
     previewSeconds,
+    accelStatus,
+    accelSelectionEndsAt,
+    accelProgress,
     loading,
     error,
     refetch,
   } = useAuction(roomId, { role: 'host' });
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (accelStatus !== 'selecting') return;
+    setNowMs(Date.now());
+    const id = window.setInterval(() => setNowMs(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [accelStatus]);
 
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('all');
@@ -334,11 +357,17 @@ export default function HostAuction() {
 
   const handleStartNextLot = useCallback(() => {
     if (!room || !canStartNext) return;
-    void runRpc('start-lot', 'host_start_lot', {
-      p_room: room.id,
-      p_room_player_id: null,
-    });
-  }, [room, canStartNext, runRpc]);
+    if (accelStatus === 'live') {
+      void runRpc('start-lot', 'host_start_accel_lot', {
+        p_room: room.id,
+      });
+    } else {
+      void runRpc('start-lot', 'host_start_lot', {
+        p_room: room.id,
+        p_room_player_id: null,
+      });
+    }
+  }, [room, canStartNext, accelStatus, runRpc]);
 
   const handlePutPlayerOnBlock = useCallback(
     (roomPlayerId: string) => {
@@ -566,6 +595,38 @@ export default function HostAuction() {
 
   return (
     <div className="space-y-4">
+      {accelStatus === 'selecting' && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-amber-400/60 bg-amber-500/10 px-5 py-3"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] border border-amber-400/50 bg-[#070B14] text-amber-300">
+              <Zap className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-amber-300">
+                ACCELERATED SELECTION WINDOW OPEN
+              </p>
+              <p className="font-mono text-xs text-[#E8ECF4] tabular-nums">
+                Closes in{' '}
+                <span className="font-bold text-amber-300">
+                  {formatAccelCountdown(accelSelectionEndsAt, nowMs + offsetMs)}
+                </span>{' '}
+                · {accelProgress?.unsold_total ?? 0} unsold players eligible
+              </p>
+            </div>
+          </div>
+
+          <Link to={`/host/${room.id}/accelerated`} className="shrink-0">
+            <Button variant="gold" size="sm">
+              <span>Accelerated Console</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </div>
+      )}
+
       {/* A. TOP LOT HEADER PANEL */}
       <Card brackets bracketTone="gold" className="p-4 sm:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -589,9 +650,28 @@ export default function HostAuction() {
                 <span>{PHASE_LABEL[phase]}</span>
               </Badge>
 
-              <Tag accent="cyan">
-                SET {currentSetNo} · {currentSetInfo?.label ?? 'POOL'}
-              </Tag>
+              {accelStatus === 'live' ? (
+                <>
+                  <Badge tone="danger">
+                    <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                    <span>ACCELERATED ROUND</span>
+                  </Badge>
+                  <Link
+                    to={`/host/${room.id}/accelerated`}
+                    className="inline-flex items-center gap-1 rounded-[2px] border border-white/15 bg-[#070B14] px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-[#22D3EE] hover:border-[#22D3EE]"
+                  >
+                    <span>
+                      Queue ({accelProgress?.queue_remaining ?? 0}/
+                      {accelProgress?.queue_total ?? 0})
+                    </span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
+                </>
+              ) : (
+                <Tag accent="cyan">
+                  SET {currentSetNo} · {currentSetInfo?.label ?? 'POOL'}
+                </Tag>
+              )}
 
               {player?.player_code && (
                 <span className="rounded-[2px] border border-[#22D3EE]/35 bg-[#070B14] px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-[#22D3EE]">
@@ -637,7 +717,9 @@ export default function HostAuction() {
                 </h1>
                 <p className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-[#8B95AA]">
                   {room.auction_open
-                    ? 'Press Start next lot [Enter] or pick any pending player from the set queue below.'
+                    ? accelStatus === 'live'
+                      ? 'Press Start next accelerated lot [Enter] or manage the queue on the Accelerated Round page.'
+                      : 'Press Start next lot [Enter] or pick any pending player from the set queue below.'
                     : 'Open the auction room gate on the left panel before starting the next lot.'}
                 </p>
               </div>
@@ -814,11 +896,13 @@ export default function HostAuction() {
                   ? 'Open the auction room first'
                   : lotInProgress
                     ? 'Resolve the current lot first'
-                    : 'Start next pending player in current set'
+                    : accelStatus === 'live'
+                      ? 'Start next player from the accelerated queue'
+                      : 'Start next pending player in current set'
               }
             >
               <Button
-                variant="cyan"
+                variant={accelStatus === 'live' ? 'gold' : 'cyan'}
                 size="md"
                 disabled={!canStartNext}
                 onClick={handleStartNextLot}
@@ -826,7 +910,11 @@ export default function HostAuction() {
               >
                 <span className="inline-flex items-center gap-2">
                   <Play className="h-4 w-4" />
-                  <span>Start next lot</span>
+                  <span>
+                    {accelStatus === 'live'
+                      ? 'Start next accelerated lot'
+                      : 'Start next lot'}
+                  </span>
                 </span>
                 <KeyCap>Enter</KeyCap>
               </Button>
@@ -849,7 +937,7 @@ export default function HostAuction() {
             <select
               id="auction-set-select"
               value={currentSetNo}
-              disabled={isBusy}
+              disabled={isBusy || accelStatus === 'live'}
               onChange={(e) => handleSetChange(Number(e.target.value))}
               className={`${INPUT_BASE_CLASS} py-2 text-xs`}
             >
@@ -870,13 +958,22 @@ export default function HostAuction() {
             <Button
               variant="outline"
               size="sm"
-              disabled={isBusy || currentSetNo >= PLAYER_CATEGORIES.length}
+              disabled={
+                isBusy ||
+                accelStatus === 'live' ||
+                currentSetNo >= PLAYER_CATEGORIES.length
+              }
               onClick={() => handleSetChange(currentSetNo + 1)}
               className="w-full justify-center"
             >
               <SkipForward className="h-3.5 w-3.5" />
               <span>Next set</span>
             </Button>
+            {accelStatus === 'live' && (
+              <p className="font-mono text-[10px] uppercase tracking-[0.06em] text-red-300">
+                Set selector locked during accelerated round
+              </p>
+            )}
           </div>
 
           {/* Time and Regulation */}

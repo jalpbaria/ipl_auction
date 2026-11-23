@@ -4,8 +4,6 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
-  Eye,
-  EyeOff,
   Info,
   Lock,
   Monitor,
@@ -37,7 +35,6 @@ import type {
 } from '../../types/database';
 
 type PendingControlAction =
-  | { type: 'publish'; nextValue: boolean }
   | { type: 'lock_xi'; nextValue: boolean }
   | { type: 'projector_mode'; nextMode: ProjectorMode }
   | null;
@@ -165,7 +162,6 @@ export default function HostLeaderboard() {
 
   if (!room) return null;
 
-  const isPublic = Boolean(room.leaderboard_public);
   const isXiLocked = Boolean(room.xi_locked);
   const projectorMode: ProjectorMode = room.projector_mode ?? 'auction';
   const xiOverseasLimit = room.xi_overseas_max ?? room.overseas_max;
@@ -226,23 +222,7 @@ export default function HostLeaderboard() {
     setActionLoading(true);
 
     try {
-      if (pendingAction.type === 'publish') {
-        const { error: rpcErr } = await supabase.rpc('set_leaderboard_public', {
-          p_room: room.id,
-          p_public: pendingAction.nextValue,
-        });
-        if (rpcErr) throw new Error(rpcErr.message);
-        await refreshRoom();
-        showToast({
-          title: pendingAction.nextValue
-            ? 'Leaderboard published to teams'
-            : 'Leaderboard hidden from teams',
-          description: pendingAction.nextValue
-            ? 'Franchise consoles can now view tournament standings.'
-            : 'Team-side leaderboard visibility has been turned off.',
-          tone: 'success',
-        });
-      } else if (pendingAction.type === 'lock_xi') {
+      if (pendingAction.type === 'lock_xi') {
         const { error: rpcErr } = await supabase.rpc('set_xi_locked', {
           p_room: room.id,
           p_locked: pendingAction.nextValue,
@@ -297,23 +277,6 @@ export default function HostLeaderboard() {
 
   const confirmModalCopy = (() => {
     if (!pendingAction) return null;
-    if (pendingAction.type === 'publish') {
-      return pendingAction.nextValue
-        ? {
-            title: 'Publish leaderboard to teams',
-            message:
-              'Make the live standings visible inside every active franchise console?',
-            confirmLabel: 'Publish leaderboard',
-            tone: 'cyan' as const,
-          }
-        : {
-            title: 'Hide leaderboard from teams',
-            message:
-              'Hide the standings from franchise consoles while keeping host access?',
-            confirmLabel: 'Hide leaderboard',
-            tone: 'gold' as const,
-          };
-    }
 
     if (pendingAction.type === 'lock_xi') {
       return pendingAction.nextValue
@@ -387,15 +350,20 @@ export default function HostLeaderboard() {
         </div>
       </div>
 
-      {/* Formula Note Box */}
-      <div className="flex items-start gap-3 rounded-[4px] border border-[#22D3EE]/35 bg-[#0E1524] px-4 py-3.5">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#22D3EE]" aria-hidden="true" />
-        <p className="text-xs leading-relaxed text-[#E8ECF4]">
-          The scoring formula is a placeholder stored in the database function{' '}
-          <code className="rounded-[2px] border border-white/10 bg-[#070B14] px-1.5 py-0.5 font-mono text-[11px] text-[#22D3EE]">
-            _team_score
-          </code>
-          . It will be replaced with the official formula.
+      {/* Visibility & Formula Notes */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-[4px] border border-[#22D3EE]/35 bg-[#0E1524] px-4 py-3.5">
+        <div className="flex items-start gap-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#22D3EE]" aria-hidden="true" />
+          <p className="text-xs leading-relaxed text-[#E8ECF4]">
+            The scoring formula is a placeholder stored in the database function{' '}
+            <code className="rounded-[2px] border border-white/10 bg-[#070B14] px-1.5 py-0.5 font-mono text-[11px] text-[#22D3EE]">
+              _team_score
+            </code>
+            . It will be replaced with the official formula.
+          </p>
+        </div>
+        <p className="shrink-0 font-mono text-[11px] uppercase tracking-[0.06em] text-[#F5B921]">
+          The leaderboard is visible to the host and on the projector only.
         </p>
       </div>
 
@@ -410,44 +378,8 @@ export default function HostLeaderboard() {
           </span>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {/* 1. Publish leaderboard to teams */}
-          <div className="flex flex-col justify-between gap-4 rounded-[4px] border border-white/[0.08] bg-[#070B14] p-4">
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#E8ECF4]">
-                  Publish leaderboard to teams
-                </span>
-                <Badge tone={isPublic ? 'cyan' : 'neutral'}>
-                  {isPublic ? 'PUBLIC' : 'HIDDEN'}
-                </Badge>
-              </div>
-              <p className="mt-1.5 text-xs text-[#8B95AA]">
-                Allows franchise accounts to inspect final standings on their team screen.
-              </p>
-            </div>
-            <Button
-              variant={isPublic ? 'outline' : 'cyan'}
-              size="sm"
-              onClick={() =>
-                setPendingAction({ type: 'publish', nextValue: !isPublic })
-              }
-            >
-              {isPublic ? (
-                <>
-                  <EyeOff className="h-3.5 w-3.5" />
-                  <span>Hide from teams</span>
-                </>
-              ) : (
-                <>
-                  <Eye className="h-3.5 w-3.5" />
-                  <span>Publish to teams</span>
-                </>
-              )}
-            </Button>
-          </div>
-
-          {/* 2. Lock all playing XIs */}
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* 1. Lock all playing XIs */}
           <div className="flex flex-col justify-between gap-4 rounded-[4px] border border-white/[0.08] bg-[#070B14] p-4">
             <div>
               <div className="flex items-center justify-between gap-2">
@@ -483,7 +415,7 @@ export default function HostLeaderboard() {
             </Button>
           </div>
 
-          {/* 3. Reveal leaderboard on projector */}
+          {/* 2. Reveal leaderboard on projector */}
           <div className="flex flex-col justify-between gap-4 rounded-[4px] border border-white/[0.08] bg-[#070B14] p-4">
             <div>
               <div className="flex items-center justify-between gap-2">

@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ArrowRight,
   Bell,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   TrendingUp,
   Users,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -28,7 +30,11 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { CornerBrackets } from '../components/ui/CornerBrackets';
 import { getSkillInfo, type PlayerSkill } from '../data/categories';
-import { normalizeSetProgress, type SetProgress } from '../lib/auction';
+import {
+  normalizeAccelProgress,
+  normalizeSetProgress,
+  type SetProgress,
+} from '../lib/auction';
 import { formatLakhs } from '../lib/format';
 import {
   overseasCount,
@@ -39,6 +45,7 @@ import { supabase } from '../lib/supabase';
 import { formatDateTime12h, formatRelativeTime } from '../lib/time';
 import { useAuthStore } from '../store/auth';
 import type {
+  AccelProgress,
   DbAuctionState,
   DbNotice,
   DbPlayer,
@@ -80,7 +87,7 @@ const ROLE_ORDER: readonly { skill: PlayerSkill; plural: string }[] = [
 ];
 
 const ROOM_SELECT =
-  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, leaderboard_public, bid_timer_seconds, auction_open, status, created_at';
+  'id, host_id, name, starting_purse_lakhs, squad_max, squad_min, overseas_max, xi_overseas_max, xi_locked, bid_timer_seconds, auction_open, accel_status, accel_picks_per_team, accel_selection_ends_at, trade_status, trade_ends_at, status, created_at';
 
 const ROOM_PLAYER_SELECT =
   'id, base_price_lakhs, set_no, sort_order, status, sold_to_team_id, sold_price_lakhs, sold_at, players(id, serial, player_code, first_name, last_name, category, skill, nationality, is_overseas, ipl_season, ipl_team, matches, runs, strike_rate, economy, wickets, base_price_lakhs, card_image_url)';
@@ -100,6 +107,16 @@ function normalizeRoomPlayer(row: RawRoomPlayerRow): RoomPlayerWithPlayer {
     sold_at: row.sold_at ?? null,
     players: player,
   };
+}
+
+function formatMmSs(endsAt: string | null | undefined, serverNowMs: number): string {
+  if (!endsAt) return '00:00';
+  const target = Date.parse(endsAt);
+  if (Number.isNaN(target)) return '00:00';
+  const sec = Math.max(0, Math.ceil((target - serverNowMs) / 1000));
+  const mins = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  return `${String(mins).padStart(2, '0')}:${String(remSec).padStart(2, '0')}`;
 }
 
 function DashboardSkeleton() {
@@ -136,6 +153,7 @@ export default function PlayRoom() {
   const [notices, setNotices] = useState<DbNotice[]>([]);
   const [auctionState, setAuctionState] = useState<DbAuctionState | null>(null);
   const [setProgress, setSetProgress] = useState<SetProgress | null>(null);
+  const [accelProgress, setAccelProgress] = useState<AccelProgress | null>(null);
   const [myPlayingXi, setMyPlayingXi] = useState<DbPlayingXi | null>(null);
 
   const [squadViewMode, setSquadViewMode] = useState<SquadViewMode>('grid');
@@ -143,6 +161,7 @@ export default function PlayRoom() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [offsetMs, setOffsetMs] = useState(0);
 
   const requestSeqRef = useRef(0);
   const mountedRef = useRef(true);
@@ -155,11 +174,29 @@ export default function PlayRoom() {
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 15_000);
+    if (!supabase) return;
+    let active = true;
+    void supabase.rpc('get_server_time').then(({ data, error: timeErr }) => {
+      if (!active || timeErr || !data) return;
+      const ms = Date.parse(String(data));
+      if (!Number.isNaN(ms)) {
+        setOffsetMs(ms - Date.now());
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [roomId]);
+
+  const isWindowCountdownActive =
+    room?.accel_status === 'selecting' || room?.trade_status === 'open';
+  useEffect(() => {
+    const id = window.setInterval(
+      () => setNowMs(Date.now()),
+      isWindowCountdownActive ? 1_000 : 15_000,
+    );
     return () => window.clearInterval(id);
-  }, []);
+  }, [isWindowCountdownActive]);
 
   const loadDashboard = useCallback(
     async (silent = false) => {
@@ -214,6 +251,7 @@ export default function PlayRoom() {
           stateRes,
           xiRes,
           setProgressRes,
+          accelProgressRes,
         ] = await Promise.all([
           supabase
             .from('rooms')
@@ -257,6 +295,7 @@ export default function PlayRoom() {
             .eq('team_id', myTeam.id)
             .maybeSingle(),
           supabase.rpc('get_set_progress', { p_room: roomId }),
+          supabase.rpc('get_accel_progress', { p_room: roomId }),
         ]);
 
         if (!mountedRef.current || seq !== requestSeqRef.current) return;
@@ -292,6 +331,11 @@ export default function PlayRoom() {
         if (!setProgressRes.error) {
           setSetProgress(
             normalizeSetProgress(setProgressRes.data, nextState?.current_set_no),
+          );
+        }
+        if (!accelProgressRes.error) {
+          setAccelProgress(
+            normalizeAccelProgress(accelProgressRes.data, roomRes.data as DbRoom),
           );
         }
         if (!xiRes.error) {
@@ -340,6 +384,12 @@ export default function PlayRoom() {
         (payload) => {
           if (payload.eventType === 'UPDATE' && payload.new) {
             setRoom((prev) => ({ ...(prev ?? {}), ...(payload.new as DbRoom) }));
+            void supabase
+              ?.rpc('get_accel_progress', { p_room: roomId })
+              .then(({ data, error: apErr }) => {
+                if (!mountedRef.current || apErr) return;
+                setAccelProgress(normalizeAccelProgress(data, payload.new as DbRoom));
+              });
           }
         },
       )
@@ -397,6 +447,12 @@ export default function PlayRoom() {
               .then(({ data, error: spErr }) => {
                 if (!mountedRef.current || spErr) return;
                 setSetProgress(normalizeSetProgress(data, next.current_set_no));
+              });
+            void supabase
+              ?.rpc('get_accel_progress', { p_room: roomId })
+              .then(({ data, error: apErr }) => {
+                if (!mountedRef.current || apErr) return;
+                setAccelProgress(normalizeAccelProgress(data));
               });
           }
         },
@@ -636,6 +692,71 @@ export default function PlayRoom() {
         </div>
       </section>
 
+      {room.trade_status === 'open' && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-emerald-400/60 bg-emerald-500/10 px-5 py-3.5"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border border-emerald-400/50 bg-[#070B14] text-emerald-300">
+              <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-emerald-300">
+                Trade window open
+              </p>
+              <p className="font-mono text-[11px] text-[#E8ECF4] tabular-nums">
+                Window closes in{' '}
+                <span className="font-bold text-emerald-300">
+                  {formatMmSs(room.trade_ends_at, nowMs + offsetMs)}
+                </span>{' '}
+                · Propose or accept 1-to-3 player swaps
+              </p>
+            </div>
+          </div>
+
+          <Link to={`/play/${roomId}/trade`} className="shrink-0">
+            <Button variant="gold" size="sm">
+              <span>Open Trade Desk</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </div>
+      )}
+
+      {room.accel_status === 'selecting' && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-amber-400/60 bg-amber-500/10 px-5 py-3.5"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border border-amber-400/50 bg-[#070B14] text-amber-300">
+              <Zap className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <p className="font-mono text-xs font-bold uppercase tracking-[0.1em] text-amber-300">
+                Accelerated round: choose your players
+              </p>
+              <p className="font-mono text-[11px] text-[#E8ECF4] tabular-nums">
+                Selection closes in{' '}
+                <span className="font-bold text-amber-300">
+                  {formatMmSs(room.accel_selection_ends_at, nowMs + offsetMs)}
+                </span>{' '}
+                · Picks used {accelProgress?.my_picks ?? 0}/
+                {accelProgress?.picks_limit ?? room.accel_picks_per_team ?? 5}
+              </p>
+            </div>
+          </div>
+
+          <Link to={`/play/${roomId}/accelerated`} className="shrink-0">
+            <Button variant="gold" size="sm">
+              <span>Choose Players</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </Link>
+        </div>
+      )}
+
       {/* 2. Four Stat Tiles */}
       <section aria-label="Franchise metrics" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {/* Purse Left */}
@@ -752,6 +873,12 @@ export default function PlayRoom() {
                   <Badge tone={room.auction_open ? 'cyan' : 'danger'}>
                     {room.auction_open ? 'OPEN' : 'LOCKED'}
                   </Badge>
+                  {room.accel_status === 'live' && (
+                    <Badge tone="danger">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                      <span>ACCELERATED ROUND</span>
+                    </Badge>
+                  )}
                 </div>
                 <p className="mt-1 text-xs text-[#8B95AA]">
                   {room.auction_open
@@ -777,23 +904,44 @@ export default function PlayRoom() {
               </Link>
             </div>
 
-            {setProgress && (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-[4px] border border-white/[0.08] bg-[#070B14] px-4 py-2.5">
+            {room.accel_status === 'live' ? (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-[4px] border border-red-500/40 bg-[#070B14] px-4 py-2.5">
                 <div className="flex items-center gap-2.5">
-                  <span className="rounded-[2px] border border-[#22D3EE]/40 bg-[#0E1524] px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-[#22D3EE]">
-                    SET {setProgress.setNo}
+                  <span className="rounded-[2px] border border-red-500/50 bg-red-500/15 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-red-300">
+                    ACCELERATED ROUND
                   </span>
                   <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#E8ECF4]">
-                    {setProgress.setLabel}
+                    SECOND CHANCE QUEUE
                   </span>
                 </div>
 
                 <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#F5B921] tabular-nums">
-                  {setProgress.remaining === 0 && setProgress.total > 0
-                    ? 'SET COMPLETE'
-                    : `${setProgress.remaining} ${setProgress.remaining === 1 ? 'PLAYER' : 'PLAYERS'} LEFT IN SET`}
+                  {accelProgress?.queue_remaining ?? 0}{' '}
+                  {(accelProgress?.queue_remaining ?? 0) === 1
+                    ? 'PLAYER'
+                    : 'PLAYERS'}{' '}
+                  LEFT
                 </span>
               </div>
+            ) : (
+              setProgress && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-[4px] border border-white/[0.08] bg-[#070B14] px-4 py-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <span className="rounded-[2px] border border-[#22D3EE]/40 bg-[#0E1524] px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-[#22D3EE]">
+                      SET {setProgress.setNo}
+                    </span>
+                    <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#E8ECF4]">
+                      {setProgress.setLabel}
+                    </span>
+                  </div>
+
+                  <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em] text-[#F5B921] tabular-nums">
+                    {setProgress.remaining === 0 && setProgress.total > 0
+                      ? 'SET COMPLETE'
+                      : `${setProgress.remaining} ${setProgress.remaining === 1 ? 'PLAYER' : 'PLAYERS'} LEFT IN SET`}
+                  </span>
+                </div>
+              )
             )}
 
             {isLotLive && currentLotPlayer && (
